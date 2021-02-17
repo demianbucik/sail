@@ -1,2 +1,2 @@
-# Validate recaptcha and send email cloud function
+# Validate recaptcha and send email
 In progress

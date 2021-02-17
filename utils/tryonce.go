@@ -11,7 +11,7 @@ type TryOnce struct {
 }
 
 // Each call of TryDo will call the function fn once if
-// it hasn't returned nil in the previous calls
+// it hasn't yet returned nil in the previous calls
 func (once *TryOnce) TryDo(fn func() error) (err error) {
 	if atomic.LoadUint32(&once.done) == 0 {
 		return once.doSlow(fn)

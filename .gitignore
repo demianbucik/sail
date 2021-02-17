@@ -1,0 +1,8 @@
+
+templates/
+vendor/
+tmp/
+
+.idea/
+
+env.yaml

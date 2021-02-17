@@ -36,9 +36,10 @@ func ParseEnv(parseFunc func(*Environ) error) (*Environ, error) {
 }
 
 func ParseFromOSEnv(env *Environ) error {
-	env = &Environ{
+	*env = Environ{
 		SendGridApiKey:       os.Getenv("SENDGRID_API_KEY"),
 		ReCaptchaSecretKey:   os.Getenv("RECAPTCHA_SECRET_KEY"),
+		ReCaptchaVersion:     os.Getenv("RECAPTCHA_VERSION"),
 		NoReplyEmail:         os.Getenv("NOREPLY_EMAIL"),
 		NoReplyName:          os.Getenv("NOREPLY_NAME"),
 		RecipientEmail:       os.Getenv("RECIPIENT_EMAIL"),

@@ -74,6 +74,7 @@ func SendEmailHandler(writer http.ResponseWriter, request *http.Request) {
 	if err := sendEmailAndConfirmation(request); err != nil {
 		log.Println(err)
 		http.Redirect(writer, request, env.ErrorPage, http.StatusSeeOther)
+		return
 	}
 
 	http.Redirect(writer, request, env.ThankYouPage, http.StatusSeeOther)

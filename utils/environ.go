@@ -6,13 +6,22 @@ import (
 	"os"
 	"reflect"
 
+	"gopkg.in/ezzarghili/recaptcha-go.v4"
 	"gopkg.in/yaml.v2"
 )
 
+const (
+	v2 = "v2"
+	v3 = "v3"
+)
+
 type Environ struct {
+	envRequired  `yaml:",inline"`
+	envReCaptcha `yaml:",inline"`
+}
+
+type envRequired struct {
 	SendGridApiKey       string `yaml:"SENDGRID_API_KEY"`
-	ReCaptchaSecretKey   string `yaml:"RECAPTCHA_SECRET_KEY"`
-	ReCaptchaVersion     string `yaml:"RECAPTCHA_VERSION"`
 	NoReplyEmail         string `yaml:"NOREPLY_EMAIL"`
 	NoReplyName          string `yaml:"NOREPLY_NAME"`
 	RecipientEmail       string `yaml:"RECIPIENT_EMAIL"`
@@ -20,6 +29,22 @@ type Environ struct {
 	ThankYouPage         string `yaml:"THANK_YOU_PAGE"`
 	ErrorPage            string `yaml:"ERROR_PAGE"`
 	ConfirmationTemplate string `yaml:"CONFIRMATION_TEMPLATE"`
+}
+
+type envReCaptcha struct {
+	ReCaptchaSecretKey string `yaml:"RECAPTCHA_SECRET_KEY"`
+	ReCaptchaVersion   string `yaml:"RECAPTCHA_VERSION"`
+}
+
+func (env envReCaptcha) ShouldVerifyReCaptcha() bool {
+	return env.ReCaptchaVersion != ""
+}
+
+func (env envReCaptcha) ParseReCaptchaVersion() recaptcha.VERSION {
+	if env.ReCaptchaVersion == v2 {
+		return recaptcha.V2
+	}
+	return recaptcha.V3
 }
 
 func ParseEnv(parseFunc func(*Environ) error) (*Environ, error) {
@@ -36,10 +61,8 @@ func ParseEnv(parseFunc func(*Environ) error) (*Environ, error) {
 }
 
 func ParseFromOSEnv(env *Environ) error {
-	*env = Environ{
+	env.envRequired = envRequired{
 		SendGridApiKey:       os.Getenv("SENDGRID_API_KEY"),
-		ReCaptchaSecretKey:   os.Getenv("RECAPTCHA_SECRET_KEY"),
-		ReCaptchaVersion:     os.Getenv("RECAPTCHA_VERSION"),
 		NoReplyEmail:         os.Getenv("NOREPLY_EMAIL"),
 		NoReplyName:          os.Getenv("NOREPLY_NAME"),
 		RecipientEmail:       os.Getenv("RECIPIENT_EMAIL"),
@@ -47,6 +70,10 @@ func ParseFromOSEnv(env *Environ) error {
 		ThankYouPage:         os.Getenv("THANK_YOU_PAGE"),
 		ErrorPage:            os.Getenv("ERROR_PAGE"),
 		ConfirmationTemplate: os.Getenv("CONFIRMATION_TEMPLATE"),
+	}
+	env.envReCaptcha = envReCaptcha{
+		ReCaptchaSecretKey: os.Getenv("RECAPTCHA_SECRET_KEY"),
+		ReCaptchaVersion:   os.Getenv("RECAPTCHA_VERSION"),
 	}
 	return nil
 }
@@ -58,7 +85,6 @@ func GetParseFromYAMLFunc(filename string) func(*Environ) error {
 		if err != nil {
 			return err
 		}
-
 		if err := yaml.Unmarshal(bytes, env); err != nil {
 			return err
 		}
@@ -68,19 +94,42 @@ func GetParseFromYAMLFunc(filename string) func(*Environ) error {
 }
 
 func validate(env *Environ) error {
-	structVal := reflect.ValueOf(env).Elem()
+	if err := verifyNonEmpty(&env.envRequired); err != nil {
+		return err
+	}
+
+	if env.ShouldVerifyReCaptcha() {
+		if err := verifyNonEmpty(&env.envReCaptcha); err != nil {
+			return err
+		}
+		if env.ReCaptchaVersion != v2 && env.ReCaptchaVersion != v3 {
+			return fmt.Errorf("invalid recaptcha version '%s', use 'v2', 'v3', or '' to turn it off", env.ReCaptchaVersion)
+		}
+	}
+
+	return nil
+}
+
+func verifyNonEmpty(envStruct interface{}) error {
+	structVal := reflect.ValueOf(envStruct)
+	structType := reflect.TypeOf(envStruct)
+	if structVal.Kind() == reflect.Ptr {
+		structVal = structVal.Elem()
+		structType = structType.Elem()
+	}
+
 	for i := 0; i < structVal.NumField(); i++ {
+		if structVal.Field(i).Kind() == reflect.Struct {
+			continue
+		}
+
 		val := structVal.Field(i).Interface().(string)
 		if val == "" {
 			return fmt.Errorf(
 				"environment field '%s' should not be empty",
-				structVal.Type().Field(i).Name,
+				structType.Field(i).Tag.Get("yaml"),
 			)
 		}
-	}
-
-	if env.ReCaptchaVersion != "v2" && env.ReCaptchaVersion != "v3" {
-		return fmt.Errorf("invalid recaptcha version '%s', use 'v2' or 'v3'", env.ReCaptchaVersion)
 	}
 
 	return nil

@@ -22,9 +22,21 @@ func parseForm(request *http.Request) (*EmailForm, error) {
 	if err := request.ParseForm(); err != nil {
 		return nil, err
 	}
-	form := &EmailForm{}
-	if err := formDecoder.Decode(form, request.Form); err != nil {
+
+	form := &EmailForm{
+		MessageForm:    &MessageForm{},
+		ValidationForm: &ValidationForm{},
+	}
+
+	if err := formDecoder.Decode(form.MessageForm, request.Form); err != nil {
 		return nil, err
 	}
+
+	if env.ShouldVerifyReCaptcha() {
+		if err := formDecoder.Decode(form.ValidationForm, request.Form); err != nil {
+			return nil, err
+		}
+	}
+
 	return form, nil
 }

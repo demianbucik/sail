@@ -82,23 +82,6 @@ func SendEmailHandler(writer http.ResponseWriter, request *http.Request) {
 	http.Redirect(writer, request, env.ThankYouPage, http.StatusSeeOther)
 }
 
-func verifyReCaptcha(challenge, remoteAddr string) error {
-	var err error
-	_ = utils.Retry(tries, retryBackOff, func() error {
-		err = reCaptcha.VerifyWithOptions(challenge, recaptcha.VerifyOption{
-			RemoteIP: remoteAddr,
-		})
-		if err != nil {
-			var rcErr *recaptcha.Error
-			if errors.As(err, &rcErr) && rcErr.RequestError {
-				return err
-			}
-		}
-		return nil
-	})
-	return err
-}
-
 func sendEmailAndConfirmation(request *http.Request) error {
 	form, err := parseForm(request)
 	if err != nil {
@@ -130,6 +113,23 @@ func sendEmailAndConfirmation(request *http.Request) error {
 	}
 
 	return nil
+}
+
+func verifyReCaptcha(challenge, remoteAddr string) error {
+	var err error
+	_ = utils.Retry(tries, retryBackOff, func() error {
+		err = reCaptcha.VerifyWithOptions(challenge, recaptcha.VerifyOption{
+			RemoteIP: remoteAddr,
+		})
+		if err != nil {
+			var rcErr *recaptcha.Error
+			if errors.As(err, &rcErr) && rcErr.RequestError {
+				return err
+			}
+		}
+		return nil
+	})
+	return err
 }
 
 func getSendMessageFunc(client *sendgrid.Client, message *mail.SGMailV3) func() error {

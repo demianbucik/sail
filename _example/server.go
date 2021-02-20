@@ -16,10 +16,10 @@ func main() {
 	sail.Init(utils.GetParseFromYAMLFunc(*filePath))
 
 	mux := http.NewServeMux()
-
 	fs := http.FileServer(http.Dir("."))
-	mux.Handle("/static/", http.StripPrefix("/static/", fs))
+
 	mux.HandleFunc("/send-email", sail.SendEmailHandler)
+	mux.Handle("/", fs)
 
 	err := http.ListenAndServe(":8000", mux)
 	log.Println(err)

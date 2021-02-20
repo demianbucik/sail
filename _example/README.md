@@ -13,6 +13,7 @@ To start the server, you can just run one of the precompiled binaries, for examp
 ```bash
 ./server-linux-amd64
 ```
+You will be able to download them with the first release.
 Use the `-env` flag to specify a custom environment file, otherwise it will default to `../env.yaml`.
 Use `-help` for more information.
 

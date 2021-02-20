@@ -6,3 +6,5 @@ tmp/
 
 env.yaml
 local.env.yaml
+
+server-*

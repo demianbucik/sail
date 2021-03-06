@@ -1,25 +1,39 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Title</title>
-</head>
-<body>
-  <form method="POST" action="http://localhost:8000/send-email">
-    <div>
-      <input name="name" type="text" placeholder="Name">
-    </div>
-    <div>
-      <input name="email" type="text" placeholder="Email">
-    </div>
-    <div>
-      <input name="subject" type="text" placeholder="Subject">
-    </div>
-    <div>
-      <textarea name="message" rows="4" placeholder="Message"></textarea>
-    </div>
-    <div id="g-recaptcha-elem"></div>
-    <button type="submit">Submit</button>
-  </form>
-</body>
+  <head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+  </head>
+  <style>
+      .honey {
+          opacity: 0;
+          position: absolute;
+          top: 0;
+          left: 0;
+          height: 0;
+          width: 0;
+          z-index: -1;
+      }
+  </style>
+  <body>
+    <form method="POST" action="http://localhost:8000/send-email">
+      <div>
+        <input name="name" type="text" placeholder="Name">
+      </div>
+      <div>
+        <input name="email" type="text" placeholder="Email">
+      </div>
+      <div>
+        <input name="subject" type="text" placeholder="Subject">
+      </div>
+      <div>
+        <textarea name="message" rows="4" placeholder="Message"></textarea>
+      </div>
+      <div>
+        <input class="honey" name="honeypot" type="text" placeholder="Honeypot" autocomplete="off">
+      </div>
+      <div id="g-recaptcha-elem"></div>
+      <button type="submit">Submit</button>
+    </form>
+  </body>
 </html>

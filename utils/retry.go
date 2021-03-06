@@ -5,8 +5,10 @@ import (
 	"time"
 )
 
+var ErrNeverTried = errors.New("never tried")
+
 func Retry(tries int, backOff time.Duration, fn func() error) error {
-	err := errors.New("never tried")
+	err := ErrNeverTried
 	for i := 0; i < tries; i++ {
 		err = fn()
 		if err == nil {

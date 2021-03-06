@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"text/template"
 	"time"
 
@@ -27,8 +29,6 @@ var (
 
 	env               *utils.Environ
 	formDecoder       *schema.Decoder
-	formEncoder       *schema.Encoder
-	reCaptcha         *recaptcha.ReCAPTCHA
 	confirmationTempl *template.Template
 )
 
@@ -41,14 +41,7 @@ func Init(parseFunc func(*utils.Environ) error) {
 		}
 
 		formDecoder = schema.NewDecoder()
-		formEncoder = schema.NewEncoder()
 		formDecoder.IgnoreUnknownKeys(true)
-
-		if env.ShouldVerifyReCaptcha() {
-			// Error can only occur if secret key is empty
-			rc, _ := recaptcha.NewReCAPTCHA(env.ReCaptchaSecretKey, env.ParseReCaptchaVersion(), 10*time.Second)
-			reCaptcha = &rc
-		}
 
 		confirmationTempl, err = template.New("confirmation").
 			Option("missingkey=error").Parse(env.ConfirmationTemplate)
@@ -73,7 +66,9 @@ func SendEmailHandler(writer http.ResponseWriter, request *http.Request) {
 
 	Init(utils.ParseFromOSEnv)
 
-	if err := sendEmailAndConfirmation(request); err != nil {
+	client, reCaptcha := newClients()
+
+	if err := sendEmailAndConfirmation(client, reCaptcha, request); err != nil {
 		log.Println(err)
 		http.Redirect(writer, request, env.ErrorPage, http.StatusSeeOther)
 		return
@@ -82,40 +77,69 @@ func SendEmailHandler(writer http.ResponseWriter, request *http.Request) {
 	http.Redirect(writer, request, env.ThankYouPage, http.StatusSeeOther)
 }
 
-func sendEmailAndConfirmation(request *http.Request) error {
+var newClients = newClientsImpl
+
+func newClientsImpl() (utils.SendGridClient, utils.ReCaptcha) {
+	client := sendgrid.NewSendClient(env.SendGridApiKey)
+	if !env.ShouldVerifyReCaptcha() {
+		return client, nil
+	}
+	// Error can only occur if secret key is empty
+	reCaptcha, _ := recaptcha.NewReCAPTCHA(env.ReCaptchaSecretKey, env.ParseReCaptchaVersion(), 3*time.Second)
+	return client, &reCaptcha
+}
+
+func sendEmailAndConfirmation(client utils.SendGridClient, reCaptcha utils.ReCaptcha, request *http.Request) error {
 	form, err := parseForm(request)
 	if err != nil {
-		return &Error{"invalid form", nil, err}
+		return &Error{"invalid form", request.Form, err}
 	}
 
-	if env.ShouldVerifyReCaptcha() {
-		err = verifyReCaptcha(form.Recaptcha, request.RemoteAddr)
-		if err != nil {
-			return &Error{"recaptcha failed", form.MessageForm, err}
-		}
+	err = checkHoneypot(request.Form)
+	if err != nil {
+		return &Error{"honeypot check failed", request.Form, err}
 	}
 
-	client := sendgrid.NewSendClient(env.SendGridApiKey)
+	err = verifyReCaptcha(reCaptcha, form.Recaptcha, request.RemoteAddr)
+	if err != nil {
+		return &Error{"recaptcha failed", request.Form, err}
+	}
 
 	message := newMessage(form)
-	err = utils.Retry(tries, retryBackOff, getSendMessageFunc(client, message))
+	err = utils.Retry(tries, retryBackOff, sendMessageFunc(client, message))
 	if err != nil {
-		return &Error{"sending email failed", form.MessageForm, err}
+		return &Error{"sending email failed", request.Form, err}
 	}
 
 	confirmation, err := newConfirmation(form)
 	if err != nil {
-		return &Error{"template error", form.MessageForm, err}
+		return &Error{"template error", request.Form, err}
 	}
-	err = utils.Retry(tries, retryBackOff, getSendMessageFunc(client, confirmation))
+
+	err = utils.Retry(tries, retryBackOff, sendMessageFunc(client, confirmation))
 	if err != nil {
-		return &Error{"sending confirmation failed", form.MessageForm, err}
+		return &Error{"sending confirmation failed", request.Form, err}
 	}
 
 	return nil
 }
 
-func verifyReCaptcha(challenge, remoteAddr string) error {
+func checkHoneypot(form url.Values) error {
+	if env.HoneypotField == "" {
+		return nil
+	}
+	values := form[env.HoneypotField]
+	honeypotValue := strings.Join(values, ",")
+	if len(honeypotValue) > 0 {
+		return fmt.Errorf("invalid '%s' value '%s'", env.HoneypotField, honeypotValue)
+	}
+	return nil
+}
+
+func verifyReCaptcha(reCaptcha utils.ReCaptcha, challenge, remoteAddr string) error {
+	if reCaptcha == nil {
+		return nil
+	}
 	var err error
 	_ = utils.Retry(tries, retryBackOff, func() error {
 		err = reCaptcha.VerifyWithOptions(challenge, recaptcha.VerifyOption{
@@ -132,7 +156,7 @@ func verifyReCaptcha(challenge, remoteAddr string) error {
 	return err
 }
 
-func getSendMessageFunc(client *sendgrid.Client, message *mail.SGMailV3) func() error {
+func sendMessageFunc(client utils.SendGridClient, message *mail.SGMailV3) func() error {
 	return func() error {
 		resp, err := client.Send(message)
 		if err != nil {

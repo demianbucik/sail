@@ -7,16 +7,13 @@ import (
 
 type Error struct {
 	Message string
-	Form    *MessageForm
+	Form    url.Values
 	Err     error
 }
 
 func (err Error) Error() string {
-	if err.Form != nil {
-		formValues := make(url.Values)
-		if formErr := formEncoder.Encode(err.Form, formValues); formErr == nil {
-			return fmt.Sprintf("%s, form '%s': %s", err.Message, formValues.Encode(), err.Err)
-		}
+	if len(err.Form) > 0 {
+		return fmt.Sprintf("%s, form '%s': %s", err.Message, err.Form.Encode(), err.Err)
 	}
 	return fmt.Sprintf("%s: %s", err.Message, err.Err)
 }

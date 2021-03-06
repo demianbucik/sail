@@ -11,13 +11,14 @@ import (
 )
 
 const (
-	v2 = "v2"
-	v3 = "v3"
+	reCaptchaV2 = "v2"
+	reCaptchaV3 = "v3"
 )
 
 type Environ struct {
-	envRequired  `yaml:",inline"`
-	envReCaptcha `yaml:",inline"`
+	envRequired   `yaml:",inline"`
+	envReCaptcha  `yaml:",inline"`
+	HoneypotField string `yaml:"HONEYPOT_FIELD"`
 }
 
 type envRequired struct {
@@ -41,7 +42,7 @@ func (env envReCaptcha) ShouldVerifyReCaptcha() bool {
 }
 
 func (env envReCaptcha) ParseReCaptchaVersion() recaptcha.VERSION {
-	if env.ReCaptchaVersion == v2 {
+	if env.ReCaptchaVersion == reCaptchaV2 {
 		return recaptcha.V2
 	}
 	return recaptcha.V3
@@ -61,6 +62,7 @@ func ParseEnv(parseFunc func(*Environ) error) (*Environ, error) {
 }
 
 func ParseFromOSEnv(env *Environ) error {
+	env.HoneypotField = os.Getenv("HONEYPOT_FIELD")
 	env.envRequired = envRequired{
 		SendGridApiKey:       os.Getenv("SENDGRID_API_KEY"),
 		NoReplyEmail:         os.Getenv("NOREPLY_EMAIL"),
@@ -79,13 +81,13 @@ func ParseFromOSEnv(env *Environ) error {
 }
 
 // For local development
-func GetParseFromYAMLFunc(filename string) func(*Environ) error {
+func GetParseFromYAMLFunc(filePath string) func(*Environ) error {
 	return func(env *Environ) error {
-		bytes, err := ioutil.ReadFile(filename)
+		fileBytes, err := ioutil.ReadFile(filePath)
 		if err != nil {
 			return err
 		}
-		if err := yaml.Unmarshal(bytes, env); err != nil {
+		if err := yaml.Unmarshal(fileBytes, env); err != nil {
 			return err
 		}
 
@@ -102,7 +104,7 @@ func validate(env *Environ) error {
 		if err := verifyNonEmpty(&env.envReCaptcha); err != nil {
 			return err
 		}
-		if env.ReCaptchaVersion != v2 && env.ReCaptchaVersion != v3 {
+		if env.ReCaptchaVersion != reCaptchaV2 && env.ReCaptchaVersion != reCaptchaV3 {
 			return fmt.Errorf("invalid recaptcha version '%s', use 'v2', 'v3', or '' to turn it off", env.ReCaptchaVersion)
 		}
 	}

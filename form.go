@@ -9,13 +9,13 @@ type MessageForm struct {
 	Message string `schema:"message,required"`
 }
 
-type ValidationForm struct {
-	Recaptcha string `schema:"g-recaptcha-response,required"`
+type ReCaptchaForm struct {
+	ReCaptcha string `schema:"g-recaptcha-response,required"`
 }
 
 type EmailForm struct {
-	*MessageForm
-	*ValidationForm
+	MessageForm
+	ReCaptchaForm
 }
 
 func parseForm(request *http.Request) (*EmailForm, error) {
@@ -23,17 +23,14 @@ func parseForm(request *http.Request) (*EmailForm, error) {
 		return nil, err
 	}
 
-	form := &EmailForm{
-		MessageForm:    &MessageForm{},
-		ValidationForm: &ValidationForm{},
-	}
+	form := &EmailForm{}
 
-	if err := formDecoder.Decode(form.MessageForm, request.Form); err != nil {
+	if err := formDecoder.Decode(&form.MessageForm, request.Form); err != nil {
 		return nil, err
 	}
 
 	if env.ShouldVerifyReCaptcha() {
-		if err := formDecoder.Decode(form.ValidationForm, request.Form); err != nil {
+		if err := formDecoder.Decode(&form.ReCaptchaForm, request.Form); err != nil {
 			return nil, err
 		}
 	}

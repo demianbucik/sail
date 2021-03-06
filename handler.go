@@ -100,7 +100,7 @@ func sendEmailAndConfirmation(client utils.SendGridClient, reCaptcha utils.ReCap
 		return &Error{"honeypot check failed", request.Form, err}
 	}
 
-	err = verifyReCaptcha(reCaptcha, form.Recaptcha, request.RemoteAddr)
+	err = verifyReCaptcha(reCaptcha, form.ReCaptcha, request.RemoteAddr)
 	if err != nil {
 		return &Error{"recaptcha failed", request.Form, err}
 	}

@@ -105,7 +105,7 @@ func validate(env *Environ) error {
 			return err
 		}
 		if env.ReCaptchaVersion != reCaptchaV2 && env.ReCaptchaVersion != reCaptchaV3 {
-			return fmt.Errorf("invalid recaptcha version '%s', use 'reCaptchaV2', 'reCaptchaV3', or '' to turn it off", env.ReCaptchaVersion)
+			return fmt.Errorf("invalid recaptcha version '%s', use 'v2', 'v3', or '' to turn it off", env.ReCaptchaVersion)
 		}
 	}
 

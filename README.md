@@ -3,7 +3,7 @@ Sail is a simple form backend API for sending emails from HTML and JavaScript fo
 
 Deployment process is really simple and only takes a few minutes.
 
-To avoid spam sent by bots, you can choose between reCAPTCHA versions 2 and 3. YAML configuration file enables the setup of custom redirects and confirmation email templates that support macros.
+To avoid spam sent by bots, you can choose between reCAPTCHA versions 2 and 3, and use a _honeypot_ field. YAML configuration file enables the setup of custom redirects and confirmation email templates that support macros.
 
 ## Configuration and deployment
 ### Google Cloud and SendGrid

@@ -19,7 +19,7 @@ Use `-help` for more information.
 
 After you run start the server, visit `http://localhost:8000` with your browser and open the `form.html` file. Fill in the fields and try to submit it. 
 
-If you have a local installation of Go, you can of course the server with `go run server.go`.
+If you have a Go compiler installed locally, you can of course run the server with `go run server.go`.
 
 
 

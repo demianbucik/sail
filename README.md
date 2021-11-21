@@ -15,15 +15,15 @@ You also have to verify your domain ([https://app.sendgrid.com/guide](https://ap
 Create a new configuration file from the provided example file with `cp example.env.yaml env.yaml`.
 Provide your SendGrid and reCAPTCHA secret keys, configure your and noreply email addresses and names, redirect pages, and confirmation email template.
 
-Supported macros:
-- {{ .FormName }}
-- {{ .FormEmail }}
-- {{ .FormSubject }}
-- {{ .FormMessage }}
-- {{ .NoReplyName }}
-- {{ .NoReplyEmail }}
-- {{ .RecipientName }}
-- {{ .RecipientEmail }}
+Supported macros in confirmation email:
+- {{ .FORM_NAME }}
+- {{ .FORM_EMAIL }}
+- {{ .FORM_SUBJECT }}
+- {{ .FORM_MESSAGE }}
+- {{ .NOREPLY_NAME }}
+- {{ .NOREPLY_EMAIL }}
+- {{ .RECIPIENT_NAME }}
+- {{ .RECIPIENT_EMAIL }}
 
 To disable reCAPTCHA verification, leave the version field empty (secret key will be ignored). All other environment variables are required.
 

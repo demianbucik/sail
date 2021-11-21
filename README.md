@@ -30,7 +30,7 @@ To disable reCAPTCHA verification, leave the version field empty (secret key wil
 The form message and confirmation emails will have _reply-to_ fields configured to the other persons actual email address.
 
 ### Deployment
-You can either deploy the function by executing the deployment script `./deploy.sh`, which requires `gcloud` command-line tool ([https://cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install)).
+You can either deploy the function by executing the deployment script `./deploy.sh send-email`, which requires `gcloud` command-line tool ([https://cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install)).
 Or upload the zipped content of this repo directly via the web console ([https://console.cloud.google.com/functions/list](https://console.cloud.google.com/functions/list)).
 
 ## Local testing and development

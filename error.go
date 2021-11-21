@@ -4,15 +4,15 @@ import (
 	"fmt"
 )
 
-type Error struct {
+type sendErr struct {
 	Message string
 	Err     error
 }
 
-func (err Error) Error() string {
+func (err sendErr) Error() string {
 	return fmt.Sprintf("%s: %s", err.Message, err.Err)
 }
 
-func (err Error) Unwrap() error {
+func (err sendErr) Unwrap() error {
 	return err.Err
 }

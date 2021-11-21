@@ -6,7 +6,7 @@ import (
 	"github.com/demianbucik/sail/config"
 )
 
-type MessageForm struct {
+type messageForm struct {
 	Name     string `schema:"name,required" json:"name"`
 	Email    string `schema:"email,required" json:"email"`
 	Subject  string `schema:"subject,required" json:"subject"`
@@ -14,27 +14,27 @@ type MessageForm struct {
 	Honeypot string `json:"honeypot"`
 }
 
-type ReCaptchaForm struct {
+type reCaptchaForm struct {
 	ReCaptcha string `schema:"g-recaptcha-response,required" json:"g-recaptcha-response"`
 }
 
-type EmailForm struct {
-	MessageForm
-	ReCaptchaForm
+type emailForm struct {
+	messageForm
+	reCaptchaForm
 }
 
-func parseForm(request *http.Request) (*EmailForm, error) {
+func (service *sailService) parseForm(request *http.Request) (*emailForm, error) {
 	if err := request.ParseForm(); err != nil {
 		return nil, err
 	}
 
-	form := &EmailForm{}
-	if err := formDecoder.Decode(&form.MessageForm, request.Form); err != nil {
+	form := &emailForm{}
+	if err := service.formDecoder.Decode(&form.messageForm, request.Form); err != nil {
 		return nil, err
 	}
 
 	if config.Env.ShouldVerifyReCaptcha() {
-		if err := formDecoder.Decode(&form.ReCaptchaForm, request.Form); err != nil {
+		if err := service.formDecoder.Decode(&form.reCaptchaForm, request.Form); err != nil {
 			return nil, err
 		}
 	}

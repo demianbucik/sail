@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"runtime/debug"
 	"strings"
 	"text/template"
 	"time"
@@ -28,11 +27,27 @@ const (
 )
 
 var (
-	once utils.TryOnce
+	once    utils.TryOnce
+	service *sailService
+)
 
+type sailService struct {
+	sendClient           utils.SendGridClient
+	reCaptcha            utils.ReCaptcha
 	formDecoder          *schema.Decoder
 	confirmationTemplate *template.Template
-)
+}
+
+var SendEmailHandler = utils.ApplyMiddlewares(
+	sendEmailHandler,
+	utils.CORSMiddleware,
+	utils.LogEntryAndRecoverMiddleware,
+).ServeHTTP
+
+func sendEmailHandler(writer http.ResponseWriter, request *http.Request) {
+	Init(config.ParseFromOSEnv)
+	service.ServeHTTP(writer, request)
+}
 
 func Init(parseFunc func(*config.Environ) error) {
 	err := once.TryDo(func() error {
@@ -44,12 +59,7 @@ func Init(parseFunc func(*config.Environ) error) {
 			return fmt.Errorf("init error: %w", err)
 		}
 
-		formDecoder = schema.NewDecoder()
-		formDecoder.IgnoreUnknownKeys(true)
-
-		confirmationTemplate, err = template.New("confirmation").
-			Option("missingkey=error").
-			Parse(config.Env.ConfirmationTemplate)
+		service, err = newDefaultService()
 		if err != nil {
 			return fmt.Errorf("init error: %w", err)
 		}
@@ -61,31 +71,38 @@ func Init(parseFunc func(*config.Environ) error) {
 	}
 }
 
-var SendEmailHandler = utils.ApplyMiddlewares(
-	sendEmailHandler,
-	utils.CORSMiddleware,
-).ServeHTTP
+func newDefaultService() (*sailService, error) {
+	sendClient := sendgrid.NewSendClient(config.Env.SendGridApiKey)
 
-func sendEmailHandler(writer http.ResponseWriter, request *http.Request) {
-	logEntry := log.WithField("userAgent", request.UserAgent()).
-		WithField("remoteAddr", request.RemoteAddr).
-		WithField("url", request.RequestURI).
-		WithField("headers", request.Header)
+	var reCaptcha utils.ReCaptcha
+	if config.Env.ShouldVerifyReCaptcha() {
+		// sendErr can only occur if secret key is empty
+		re, _ := recaptcha.NewReCAPTCHA(config.Env.ReCaptchaSecretKey, config.Env.GetReCaptchaVersion(), reCaptchaTimeout)
+		reCaptcha = &re
+	}
 
-	defer func() {
-		if rvr := recover(); rvr != nil {
-			logEntry.WithField("panic", rvr).
-				WithField("stackTrace", string(debug.Stack())).
-				Error("Handler panicked")
+	formDecoder := schema.NewDecoder()
+	formDecoder.IgnoreUnknownKeys(true)
 
-			http.Error(writer, "internal server error", http.StatusInternalServerError)
-		}
-	}()
+	confirmationTemplate, err := template.New("confirmation").
+		Option("missingkey=error").
+		Parse(config.Env.ConfirmationTemplate)
+	if err != nil {
+		return nil, err
+	}
 
-	Init(config.ParseFromOSEnv)
+	return &sailService{
+		sendClient:           sendClient,
+		reCaptcha:            reCaptcha,
+		formDecoder:          formDecoder,
+		confirmationTemplate: confirmationTemplate,
+	}, nil
+}
 
-	client, reCaptcha := newClients()
-	if err := sendEmailAndConfirmation(client, reCaptcha, request); err != nil {
+func (service *sailService) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	logEntry := request.Context().Value(utils.LogEntryCtxKey).(log.Interface)
+
+	if err := service.sendEmailAndConfirmation(request); err != nil {
 		logEntry.WithError(err).WithField("form", request.Form).Error("Sending email failed")
 
 		http.Redirect(writer, request, config.Env.ErrorPage, http.StatusSeeOther)
@@ -97,67 +114,55 @@ func sendEmailHandler(writer http.ResponseWriter, request *http.Request) {
 	http.Redirect(writer, request, config.Env.ThankYouPage, http.StatusSeeOther)
 }
 
-var newClients = newClientsImpl
-
-func newClientsImpl() (utils.SendGridClient, utils.ReCaptcha) {
-	client := sendgrid.NewSendClient(config.Env.SendGridApiKey)
-	if !config.Env.ShouldVerifyReCaptcha() {
-		return client, nil
-	}
-	// Error can only occur if secret key is empty
-	reCaptcha, _ := recaptcha.NewReCAPTCHA(config.Env.ReCaptchaSecretKey, config.Env.GetReCaptchaVersion(), reCaptchaTimeout)
-	return client, &reCaptcha
-}
-
-func sendEmailAndConfirmation(client utils.SendGridClient, reCaptcha utils.ReCaptcha, request *http.Request) error {
-	form, err := parseForm(request)
+func (service *sailService) sendEmailAndConfirmation(request *http.Request) error {
+	form, err := service.parseForm(request)
 	if err != nil {
-		return Error{"invalid form", err}
+		return sendErr{"invalid form", err}
 	}
 
-	err = checkHoneypot(form)
+	err = service.checkHoneypot(form)
 	if err != nil {
-		return Error{"honeypot check failed", err}
+		return sendErr{"honeypot check failed", err}
 	}
 
-	err = verifyReCaptcha(reCaptcha, form.ReCaptcha, request.RemoteAddr)
+	err = service.verifyReCaptcha(form.ReCaptcha, request.RemoteAddr)
 	if err != nil {
-		return Error{"recaptcha failed", err}
+		return sendErr{"recaptcha failed", err}
 	}
 
-	message := newMessage(form)
-	err = utils.Retry(tries, retryBackOff, sendMessageFunc(client, message))
+	message := service.newMessage(form)
+	err = utils.Retry(tries, retryBackOff, service.sendMessageFunc(message))
 	if err != nil {
-		return Error{"sending email failed", err}
+		return sendErr{"sending email failed", err}
 	}
 
-	confirmation, err := newConfirmation(form)
+	confirmation, err := service.newConfirmation(form)
 	if err != nil {
-		return Error{"template error", err}
+		return sendErr{"template error", err}
 	}
 
-	err = utils.Retry(tries, retryBackOff, sendMessageFunc(client, confirmation))
+	err = utils.Retry(tries, retryBackOff, service.sendMessageFunc(confirmation))
 	if err != nil {
-		return Error{"sending confirmation failed", err}
+		return sendErr{"sending confirmation failed", err}
 	}
 
 	return nil
 }
 
-func checkHoneypot(form *EmailForm) error {
+func (service *sailService) checkHoneypot(form *emailForm) error {
 	if form.Honeypot != "" {
 		return fmt.Errorf("invalid '%s' value '%s'", config.Env.HoneypotField, form.Honeypot)
 	}
 	return nil
 }
 
-func verifyReCaptcha(reCaptcha utils.ReCaptcha, challenge, remoteAddr string) error {
-	if reCaptcha == nil {
+func (service *sailService) verifyReCaptcha(challenge, remoteAddr string) error {
+	if service.reCaptcha == nil {
 		return nil
 	}
 	var err error
 	_ = utils.Retry(tries, retryBackOff, func() error {
-		err = reCaptcha.VerifyWithOptions(challenge, recaptcha.VerifyOption{
+		err = service.reCaptcha.VerifyWithOptions(challenge, recaptcha.VerifyOption{
 			RemoteIP: remoteAddr,
 			// Threshold is only used for recaptcha v3
 			// and using a zero value defaults to 0.5.
@@ -174,9 +179,9 @@ func verifyReCaptcha(reCaptcha utils.ReCaptcha, challenge, remoteAddr string) er
 	return err
 }
 
-func sendMessageFunc(client utils.SendGridClient, message *mail.SGMailV3) func() error {
+func (service *sailService) sendMessageFunc(message *mail.SGMailV3) func() error {
 	return func() error {
-		resp, err := client.Send(message)
+		resp, err := service.sendClient.Send(message)
 		if err != nil {
 			return err
 		}
@@ -187,7 +192,7 @@ func sendMessageFunc(client utils.SendGridClient, message *mail.SGMailV3) func()
 	}
 }
 
-func newMessage(form *EmailForm) *mail.SGMailV3 {
+func (service *sailService) newMessage(form *emailForm) *mail.SGMailV3 {
 	from := mail.NewEmail(config.Env.NoReplyName, config.Env.NoReplyEmail)
 	to := mail.NewEmail(config.Env.RecipientName, config.Env.RecipientEmail)
 	replyTo := mail.NewEmail(form.Name, form.Email)
@@ -200,13 +205,13 @@ func newMessage(form *EmailForm) *mail.SGMailV3 {
 	return message
 }
 
-func newConfirmation(form *EmailForm) (*mail.SGMailV3, error) {
+func (service *sailService) newConfirmation(form *emailForm) (*mail.SGMailV3, error) {
 	from := mail.NewEmail(config.Env.NoReplyName, config.Env.NoReplyEmail)
 	to := mail.NewEmail(form.Name, form.Email)
 	replyTo := mail.NewEmail(config.Env.RecipientName, config.Env.RecipientEmail)
 
 	buf := &bytes.Buffer{}
-	err := confirmationTemplate.Execute(buf, map[string]interface{}{
+	err := service.confirmationTemplate.Execute(buf, map[string]interface{}{
 		"FORM_NAME":       form.Name,
 		"FORM_EMAIL":      form.Email,
 		"FORM_SUBJECT":    form.Subject,

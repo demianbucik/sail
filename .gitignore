@@ -1,10 +1,11 @@
 
-vendor/
-tmp/
+vendor
+tmp
 
-.idea/
+.idea
 
 env.yaml
 local.env.yaml
 
+server
 server-*

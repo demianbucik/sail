@@ -1,9 +1,9 @@
 .DEFAULT_GOAL := help
 
-deploy: ## Deploy the function to GCP
+deploy: ## Deploy the function to GCP production environment
 	./deploy.sh send-email
 
-deploy_staging: ## Deploy the function to a staging environment
+deploy_staging: ## Deploy the function to GCP staging environment
 	./deploy.sh staging-send-email
 
 binaries: ## Compile server binaries for local environment
@@ -21,6 +21,6 @@ mocks: tools ## Generate mocks for testing
 	go generate -x ./utils/sendgrid.go
 
 help: ## Show help
-	@egrep -h '\s##\s' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -h '\s##\s' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: deploy deploy_staging binaries tools mocks help

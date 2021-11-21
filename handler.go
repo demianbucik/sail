@@ -4,38 +4,42 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
-	"net/url"
+	"runtime/debug"
 	"strings"
 	"text/template"
 	"time"
 
+	"github.com/apex/log"
+	"github.com/apex/log/handlers/json"
 	"github.com/gorilla/schema"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 	"gopkg.in/ezzarghili/recaptcha-go.v4"
 
+	"github.com/demianbucik/sail/config"
 	"github.com/demianbucik/sail/utils"
 )
 
 const (
-	tries        = 3
-	retryBackOff = 10 * time.Millisecond
+	tries            = 3
+	retryBackOff     = 10 * time.Millisecond
+	reCaptchaTimeout = 2 * time.Second
 )
 
 var (
 	once utils.TryOnce
 
-	env               *utils.Environ
-	formDecoder       *schema.Decoder
-	confirmationTempl *template.Template
+	formDecoder          *schema.Decoder
+	confirmationTemplate *template.Template
 )
 
-func Init(parseFunc func(*utils.Environ) error) {
+func Init(parseFunc func(*config.Environ) error) {
 	err := once.TryDo(func() error {
-		var err error
-		env, err = utils.ParseEnv(parseFunc)
+		log.SetHandler(json.Default)
+		log.SetLevel(log.InfoLevel)
+
+		err := config.ParseEnv(parseFunc)
 		if err != nil {
 			return fmt.Errorf("init error: %w", err)
 		}
@@ -43,8 +47,9 @@ func Init(parseFunc func(*utils.Environ) error) {
 		formDecoder = schema.NewDecoder()
 		formDecoder.IgnoreUnknownKeys(true)
 
-		confirmationTempl, err = template.New("confirmation").
-			Option("missingkey=error").Parse(env.ConfirmationTemplate)
+		confirmationTemplate, err = template.New("confirmation").
+			Option("missingkey=error").
+			Parse(config.Env.ConfirmationTemplate)
 		if err != nil {
 			return fmt.Errorf("init error: %w", err)
 		}
@@ -56,82 +61,92 @@ func Init(parseFunc func(*utils.Environ) error) {
 	}
 }
 
-func SendEmailHandler(writer http.ResponseWriter, request *http.Request) {
+var SendEmailHandler = utils.ApplyMiddlewares(
+	sendEmailHandler,
+	utils.CORSMiddleware,
+).ServeHTTP
+
+func sendEmailHandler(writer http.ResponseWriter, request *http.Request) {
+	logEntry := log.WithField("userAgent", request.UserAgent()).
+		WithField("remoteAddr", request.RemoteAddr).
+		WithField("url", request.RequestURI).
+		WithField("headers", request.Header)
+
 	defer func() {
 		if rvr := recover(); rvr != nil {
-			log.Println("panic:", rvr)
+			logEntry.WithField("panic", rvr).
+				WithField("stackTrace", string(debug.Stack())).
+				Error("Handler panicked")
+
 			http.Error(writer, "internal server error", http.StatusInternalServerError)
 		}
 	}()
 
-	Init(utils.ParseFromOSEnv)
+	Init(config.ParseFromOSEnv)
 
 	client, reCaptcha := newClients()
-
 	if err := sendEmailAndConfirmation(client, reCaptcha, request); err != nil {
-		log.Println(err)
-		http.Redirect(writer, request, env.ErrorPage, http.StatusSeeOther)
+		logEntry.WithError(err).WithField("form", request.Form).Error("Sending email failed")
+
+		http.Redirect(writer, request, config.Env.ErrorPage, http.StatusSeeOther)
 		return
 	}
 
-	http.Redirect(writer, request, env.ThankYouPage, http.StatusSeeOther)
+	logEntry.WithField("form", request.Form).Info("Email successfully sent")
+
+	http.Redirect(writer, request, config.Env.ThankYouPage, http.StatusSeeOther)
 }
 
 var newClients = newClientsImpl
 
 func newClientsImpl() (utils.SendGridClient, utils.ReCaptcha) {
-	client := sendgrid.NewSendClient(env.SendGridApiKey)
-	if !env.ShouldVerifyReCaptcha() {
+	client := sendgrid.NewSendClient(config.Env.SendGridApiKey)
+	if !config.Env.ShouldVerifyReCaptcha() {
 		return client, nil
 	}
 	// Error can only occur if secret key is empty
-	reCaptcha, _ := recaptcha.NewReCAPTCHA(env.ReCaptchaSecretKey, env.ParseReCaptchaVersion(), 3*time.Second)
+	reCaptcha, _ := recaptcha.NewReCAPTCHA(config.Env.ReCaptchaSecretKey, config.Env.GetReCaptchaVersion(), reCaptchaTimeout)
 	return client, &reCaptcha
 }
 
 func sendEmailAndConfirmation(client utils.SendGridClient, reCaptcha utils.ReCaptcha, request *http.Request) error {
 	form, err := parseForm(request)
 	if err != nil {
-		return &Error{"invalid form", request.Form, err}
+		return Error{"invalid form", err}
 	}
 
-	err = checkHoneypot(request.Form)
+	err = checkHoneypot(form)
 	if err != nil {
-		return &Error{"honeypot check failed", request.Form, err}
+		return Error{"honeypot check failed", err}
 	}
 
 	err = verifyReCaptcha(reCaptcha, form.ReCaptcha, request.RemoteAddr)
 	if err != nil {
-		return &Error{"recaptcha failed", request.Form, err}
+		return Error{"recaptcha failed", err}
 	}
 
 	message := newMessage(form)
 	err = utils.Retry(tries, retryBackOff, sendMessageFunc(client, message))
 	if err != nil {
-		return &Error{"sending email failed", request.Form, err}
+		return Error{"sending email failed", err}
 	}
 
 	confirmation, err := newConfirmation(form)
 	if err != nil {
-		return &Error{"template error", request.Form, err}
+		return Error{"template error", err}
 	}
 
 	err = utils.Retry(tries, retryBackOff, sendMessageFunc(client, confirmation))
 	if err != nil {
-		return &Error{"sending confirmation failed", request.Form, err}
+		return Error{"sending confirmation failed", err}
 	}
 
 	return nil
 }
 
-func checkHoneypot(form url.Values) error {
-	if env.HoneypotField == "" {
-		return nil
-	}
-	values := form[env.HoneypotField]
-	honeypotValue := strings.Join(values, ",")
-	if len(honeypotValue) > 0 {
-		return fmt.Errorf("invalid '%s' value '%s'", env.HoneypotField, honeypotValue)
+func checkHoneypot(form *EmailForm) error {
+	if form.Honeypot != "" {
+		return fmt.Errorf("invalid '%s' value '%s'", config.Env.HoneypotField, form.Honeypot)
 	}
 	return nil
 }
@@ -144,6 +159,9 @@ func verifyReCaptcha(reCaptcha utils.ReCaptcha, challenge, remoteAddr string) er
 	_ = utils.Retry(tries, retryBackOff, func() error {
 		err = reCaptcha.VerifyWithOptions(challenge, recaptcha.VerifyOption{
 			RemoteIP: remoteAddr,
+			// Threshold is only used for recaptcha v3
+			// and using a zero value defaults to 0.5.
+			Threshold: config.Env.ReCaptchaV3Threshold,
 		})
 		if err != nil {
 			var rcErr *recaptcha.Error
@@ -170,34 +188,51 @@ func sendMessageFunc(client utils.SendGridClient, message *mail.SGMailV3) func()
 }
 
 func newMessage(form *EmailForm) *mail.SGMailV3 {
-	from := mail.NewEmail(env.NoReplyName, env.NoReplyEmail)
-	to := mail.NewEmail(env.RecipientName, env.RecipientEmail)
+	from := mail.NewEmail(config.Env.NoReplyName, config.Env.NoReplyEmail)
+	to := mail.NewEmail(config.Env.RecipientName, config.Env.RecipientEmail)
 	replyTo := mail.NewEmail(form.Name, form.Email)
+	contentType := getContentType([]byte(form.Message))
 
-	message := mail.NewSingleEmail(from, form.Subject, to, form.Message, "").SetReplyTo(replyTo)
+	message := mail.NewSingleEmail(from, form.Subject, to, "", "")
+	message.AddContent(mail.NewContent(contentType, form.Message))
+	message.SetReplyTo(replyTo)
+
 	return message
 }
 
 func newConfirmation(form *EmailForm) (*mail.SGMailV3, error) {
-	from := mail.NewEmail(env.NoReplyName, env.NoReplyEmail)
+	from := mail.NewEmail(config.Env.NoReplyName, config.Env.NoReplyEmail)
 	to := mail.NewEmail(form.Name, form.Email)
-	replyTo := mail.NewEmail(env.RecipientName, env.RecipientEmail)
+	replyTo := mail.NewEmail(config.Env.RecipientName, config.Env.RecipientEmail)
 
 	buf := &bytes.Buffer{}
-	err := confirmationTempl.Execute(buf, map[string]interface{}{
-		"FormName":       form.Name,
-		"FormEmail":      form.Email,
-		"FormSubject":    form.Subject,
-		"FormMessage":    form.Message,
-		"NoReplyName":    env.NoReplyName,
-		"NoReplyEmail":   env.NoReplyEmail,
-		"RecipientName":  env.RecipientName,
-		"RecipientEmail": env.RecipientEmail,
+	err := confirmationTemplate.Execute(buf, map[string]interface{}{
+		"FORM_NAME":       form.Name,
+		"FORM_EMAIL":      form.Email,
+		"FORM_SUBJECT":    form.Subject,
+		"FORM_MESSAGE":    form.Message,
+		"NOREPLY_NAME":    config.Env.NoReplyName,
+		"NOREPLY_EMAIL":   config.Env.NoReplyEmail,
+		"RECIPIENT_NAME":  config.Env.RecipientName,
+		"RECIPIENT_EMAIL": config.Env.RecipientEmail,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	message := mail.NewSingleEmail(from, form.Subject, to, buf.String(), "").SetReplyTo(replyTo)
+	contentType := getContentType(buf.Bytes())
+
+	message := mail.NewSingleEmail(from, form.Subject, to, "", "")
+	message.AddContent(mail.NewContent(contentType, buf.String()))
+	message.SetReplyTo(replyTo)
+
 	return message, nil
+}
+
+func getContentType(data []byte) string {
+	contentType := http.DetectContentType(data)
+	if strings.HasPrefix(contentType, "text/html") {
+		return "text/html"
+	}
+	return "text/plain"
 }

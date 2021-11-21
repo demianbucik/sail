@@ -15,9 +15,10 @@
 node_modules
 #!include:.gitignore
 
-_examples/
+_example
 
 deploy.sh
 example.env.yaml
 LICENSE
 README.md
+Makefile

@@ -5,18 +5,23 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/apex/log"
+	"github.com/apex/log/handlers/text"
+
 	"github.com/demianbucik/sail"
-	"github.com/demianbucik/sail/utils"
+	"github.com/demianbucik/sail/config"
 )
 
 func main() {
-	filePath := flag.String("env", "../env.yaml", "Path to YAML file with environment variables")
+	envFilePath := flag.String("env", "../env.yaml", "Path to YAML file with environment variables")
 	assetsPath := flag.String("assets", ".", "Path to folder with HTML assets you'd like to serve")
 	port := flag.Int("port", 8000, "Server port")
 
 	flag.Parse()
 
-	sail.Init(utils.GetParseFromYAMLFunc(*filePath))
+	sail.Init(config.GetParseFromYAMLFunc(*envFilePath))
+	log.SetHandler(text.Default)
+	log.SetLevel(log.DebugLevel)
 
 	mux := http.NewServeMux()
 	fs := http.FileServer(http.Dir(*assetsPath))
@@ -24,7 +29,7 @@ func main() {
 	mux.HandleFunc("/send-email", sail.SendEmailHandler)
 	mux.Handle("/", fs)
 
-	fmt.Printf("Listening at http://localhost:%d\n", *port)
+	log.Infof("Listening at http://localhost:%d", *port)
 	err := http.ListenAndServe(fmt.Sprintf(":%d", *port), mux)
-	fmt.Println(err)
+	log.Infof("%s", err)
 }

@@ -32,8 +32,11 @@ var (
 )
 
 type sailService struct {
-	sendClient           utils.SendGridClient
-	reCaptcha            utils.ReCaptcha
+	env *config.Environ
+
+	sendClient utils.SendGridClient
+	reCaptcha  utils.ReCaptcha
+
 	formDecoder          *schema.Decoder
 	confirmationTemplate *template.Template
 }
@@ -54,12 +57,12 @@ func Init(parseFunc func(*config.Environ) error) {
 		log.SetHandler(json.Default)
 		log.SetLevel(log.InfoLevel)
 
-		err := config.ParseEnv(parseFunc)
+		env, err := config.ParseEnv(parseFunc)
 		if err != nil {
 			return fmt.Errorf("init error: %w", err)
 		}
 
-		service, err = newDefaultService()
+		service, err = newDefaultService(env)
 		if err != nil {
 			return fmt.Errorf("init error: %w", err)
 		}
@@ -71,13 +74,13 @@ func Init(parseFunc func(*config.Environ) error) {
 	}
 }
 
-func newDefaultService() (*sailService, error) {
-	sendClient := sendgrid.NewSendClient(config.Env.SendGridApiKey)
+func newDefaultService(env *config.Environ) (*sailService, error) {
+	sendClient := sendgrid.NewSendClient(env.SendGridApiKey)
 
 	var reCaptcha utils.ReCaptcha
-	if config.Env.ShouldVerifyReCaptcha() {
-		// sendErr can only occur if secret key is empty
-		re, _ := recaptcha.NewReCAPTCHA(config.Env.ReCaptchaSecretKey, config.Env.GetReCaptchaVersion(), reCaptchaTimeout)
+	if env.ShouldVerifyReCaptcha() {
+		// Error can only occur if secret key is empty
+		re, _ := recaptcha.NewReCAPTCHA(env.ReCaptchaSecretKey, env.GetReCaptchaVersion(), reCaptchaTimeout)
 		reCaptcha = &re
 	}
 
@@ -86,12 +89,13 @@ func newDefaultService() (*sailService, error) {
 
 	confirmationTemplate, err := template.New("confirmation").
 		Option("missingkey=error").
-		Parse(config.Env.ConfirmationTemplate)
+		Parse(env.ConfirmationTemplate)
 	if err != nil {
 		return nil, err
 	}
 
 	return &sailService{
+		env:                  env,
 		sendClient:           sendClient,
 		reCaptcha:            reCaptcha,
 		formDecoder:          formDecoder,
@@ -105,13 +109,13 @@ func (service *sailService) ServeHTTP(writer http.ResponseWriter, request *http.
 	if err := service.sendEmailAndConfirmation(request); err != nil {
 		logEntry.WithError(err).WithField("form", request.Form).Error("Sending email failed")
 
-		http.Redirect(writer, request, config.Env.ErrorPage, http.StatusSeeOther)
+		http.Redirect(writer, request, service.env.ErrorPage, http.StatusSeeOther)
 		return
 	}
 
 	logEntry.WithField("form", request.Form).Info("Email successfully sent")
 
-	http.Redirect(writer, request, config.Env.ThankYouPage, http.StatusSeeOther)
+	http.Redirect(writer, request, service.env.ThankYouPage, http.StatusSeeOther)
 }
 
 func (service *sailService) sendEmailAndConfirmation(request *http.Request) error {
@@ -151,7 +155,7 @@ func (service *sailService) sendEmailAndConfirmation(request *http.Request) erro
 
 func (service *sailService) checkHoneypot(form *emailForm) error {
 	if form.Honeypot != "" {
-		return fmt.Errorf("invalid '%s' value '%s'", config.Env.HoneypotField, form.Honeypot)
+		return fmt.Errorf("invalid '%s' value '%s'", service.env.HoneypotField, form.Honeypot)
 	}
 	return nil
 }
@@ -166,7 +170,7 @@ func (service *sailService) verifyReCaptcha(challenge, remoteAddr string) error 
 			RemoteIP: remoteAddr,
 			// Threshold is only used for recaptcha v3
 			// and using a zero value defaults to 0.5.
-			Threshold: config.Env.ReCaptchaV3Threshold,
+			Threshold: service.env.ReCaptchaV3Threshold,
 		})
 		if err != nil {
 			var rcErr *recaptcha.Error
@@ -193,8 +197,8 @@ func (service *sailService) sendMessageFunc(message *mail.SGMailV3) func() error
 }
 
 func (service *sailService) newMessage(form *emailForm) *mail.SGMailV3 {
-	from := mail.NewEmail(config.Env.NoReplyName, config.Env.NoReplyEmail)
-	to := mail.NewEmail(config.Env.RecipientName, config.Env.RecipientEmail)
+	from := mail.NewEmail(service.env.NoReplyName, service.env.NoReplyEmail)
+	to := mail.NewEmail(service.env.RecipientName, service.env.RecipientEmail)
 	replyTo := mail.NewEmail(form.Name, form.Email)
 	contentType := getContentType([]byte(form.Message))
 
@@ -206,9 +210,9 @@ func (service *sailService) newMessage(form *emailForm) *mail.SGMailV3 {
 }
 
 func (service *sailService) newConfirmation(form *emailForm) (*mail.SGMailV3, error) {
-	from := mail.NewEmail(config.Env.NoReplyName, config.Env.NoReplyEmail)
+	from := mail.NewEmail(service.env.NoReplyName, service.env.NoReplyEmail)
 	to := mail.NewEmail(form.Name, form.Email)
-	replyTo := mail.NewEmail(config.Env.RecipientName, config.Env.RecipientEmail)
+	replyTo := mail.NewEmail(service.env.RecipientName, service.env.RecipientEmail)
 
 	buf := &bytes.Buffer{}
 	err := service.confirmationTemplate.Execute(buf, map[string]interface{}{
@@ -216,10 +220,10 @@ func (service *sailService) newConfirmation(form *emailForm) (*mail.SGMailV3, er
 		"FORM_EMAIL":      form.Email,
 		"FORM_SUBJECT":    form.Subject,
 		"FORM_MESSAGE":    form.Message,
-		"NOREPLY_NAME":    config.Env.NoReplyName,
-		"NOREPLY_EMAIL":   config.Env.NoReplyEmail,
-		"RECIPIENT_NAME":  config.Env.RecipientName,
-		"RECIPIENT_EMAIL": config.Env.RecipientEmail,
+		"NOREPLY_NAME":    service.env.NoReplyName,
+		"NOREPLY_EMAIL":   service.env.NoReplyEmail,
+		"RECIPIENT_NAME":  service.env.RecipientName,
+		"RECIPIENT_EMAIL": service.env.RecipientEmail,
 	})
 	if err != nil {
 		return nil, err

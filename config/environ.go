@@ -11,10 +11,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var (
-	Env = &Environ{}
-)
-
 const (
 	reCaptchaV2 = "v2"
 	reCaptchaV3 = "v3"
@@ -58,14 +54,15 @@ func (env envReCaptcha) GetReCaptchaVersion() recaptcha.VERSION {
 	return recaptcha.V3
 }
 
-func ParseEnv(parseFunc func(*Environ) error) error {
-	if err := parseFunc(Env); err != nil {
-		return err
+func ParseEnv(parseFunc func(*Environ) error) (*Environ, error) {
+	env := &Environ{}
+	if err := parseFunc(env); err != nil {
+		return nil, err
 	}
-	if err := validate(Env); err != nil {
-		return err
+	if err := validate(env); err != nil {
+		return nil, err
 	}
-	return nil
+	return env, nil
 }
 
 func ParseFromOSEnv(env *Environ) error {

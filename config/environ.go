@@ -1,4 +1,4 @@
-package utils
+package config
 
 import (
 	"fmt"
@@ -11,6 +11,10 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+var (
+	Env = &Environ{}
+)
+
 const (
 	reCaptchaV2 = "v2"
 	reCaptchaV3 = "v3"
@@ -20,8 +24,11 @@ type Environ struct {
 	envRequired  `yaml:",inline"`
 	envReCaptcha `yaml:",inline"`
 	// Optional fields
-	HoneypotField        string  `yaml:"HONEYPOT_FIELD"`
-	ReCaptchaV3Threshold float32 `yaml:"RECAPTCHA_V3_THRESHOLD"`
+	HoneypotField string `yaml:"HONEYPOT_FIELD"`
+	// GCP requires string values inside environment variables YAML file, using for example 0.25 fails.
+	// The YAML parser can only decode "0.25" as a string. So we need to use 2 variables here.
+	ReCaptchaV3ThresholdStr string `yaml:"RECAPTCHA_V3_THRESHOLD"`
+	ReCaptchaV3Threshold    float32
 }
 
 type envRequired struct {
@@ -51,39 +58,41 @@ func (env envReCaptcha) GetReCaptchaVersion() recaptcha.VERSION {
 	return recaptcha.V3
 }
 
-func ParseEnv(parseFunc func(*Environ) error) (*Environ, error) {
-	env := &Environ{}
-	if err := parseFunc(env); err != nil {
-		return nil, err
+func ParseEnv(parseFunc func(*Environ) error) error {
+	if err := parseFunc(Env); err != nil {
+		return err
 	}
-	if err := validate(env); err != nil {
-		return nil, err
+	if err := validate(Env); err != nil {
+		return err
 	}
-	return env, nil
+	return nil
 }
 
 func ParseFromOSEnv(env *Environ) error {
 	env.HoneypotField = os.Getenv("HONEYPOT_FIELD")
-	env.envRequired = envRequired{
-		SendGridApiKey:       os.Getenv("SENDGRID_API_KEY"),
-		NoReplyEmail:         os.Getenv("NOREPLY_EMAIL"),
-		NoReplyName:          os.Getenv("NOREPLY_NAME"),
-		RecipientEmail:       os.Getenv("RECIPIENT_EMAIL"),
-		RecipientName:        os.Getenv("RECIPIENT_NAME"),
-		ThankYouPage:         os.Getenv("THANK_YOU_PAGE"),
-		ErrorPage:            os.Getenv("ERROR_PAGE"),
-		ConfirmationTemplate: os.Getenv("CONFIRMATION_TEMPLATE"),
+	env.SendGridApiKey = os.Getenv("SENDGRID_API_KEY")
+	env.NoReplyEmail = os.Getenv("NOREPLY_EMAIL")
+	env.NoReplyName = os.Getenv("NOREPLY_NAME")
+	env.RecipientEmail = os.Getenv("RECIPIENT_EMAIL")
+	env.RecipientName = os.Getenv("RECIPIENT_NAME")
+	env.ThankYouPage = os.Getenv("THANK_YOU_PAGE")
+	env.ErrorPage = os.Getenv("ERROR_PAGE")
+	env.ConfirmationTemplate = os.Getenv("CONFIRMATION_TEMPLATE")
+	env.ReCaptchaSecretKey = os.Getenv("RECAPTCHA_SECRET_KEY")
+	env.ReCaptchaVersion = os.Getenv("RECAPTCHA_VERSION")
+	thresholdStr := os.Getenv("RECAPTCHA_V3_THRESHOLD")
+	if thresholdStr != "" {
+		threshold, err := strconv.ParseFloat(thresholdStr, 32)
+		if err != nil {
+			return err
+		}
+		env.ReCaptchaV3Threshold = float32(threshold)
 	}
-	env.envReCaptcha = envReCaptcha{
-		ReCaptchaSecretKey: os.Getenv("RECAPTCHA_SECRET_KEY"),
-		ReCaptchaVersion:   os.Getenv("RECAPTCHA_VERSION"),
-	}
-	threshold, _ := strconv.ParseFloat(os.Getenv("RECAPTCHA_V3_THRESHOLD"), 32)
-	env.ReCaptchaV3Threshold = float32(threshold)
+
 	return nil
 }
 
-// For local development
+// GetParseFromYAMLFunc can be used for local development.
 func GetParseFromYAMLFunc(filePath string) func(*Environ) error {
 	return func(env *Environ) error {
 		fileBytes, err := ioutil.ReadFile(filePath)
@@ -92,6 +101,13 @@ func GetParseFromYAMLFunc(filePath string) func(*Environ) error {
 		}
 		if err := yaml.Unmarshal(fileBytes, env); err != nil {
 			return err
+		}
+		if env.ReCaptchaV3ThresholdStr != "" {
+			threshold, err := strconv.ParseFloat(env.ReCaptchaV3ThresholdStr, 32)
+			if err != nil {
+				return err
+			}
+			env.ReCaptchaV3Threshold = float32(threshold)
 		}
 		return nil
 	}
@@ -107,7 +123,10 @@ func validate(env *Environ) error {
 			return err
 		}
 		if env.ReCaptchaVersion != reCaptchaV2 && env.ReCaptchaVersion != reCaptchaV3 {
-			return fmt.Errorf("invalid recaptcha version '%s', use 'v2', 'v3', or '' to turn it off", env.ReCaptchaVersion)
+			return fmt.Errorf(
+				"invalid recaptcha version '%s', use 'v2', 'v3', or '' to turn it off",
+				env.ReCaptchaVersion,
+			)
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"reflect"
+	"strconv"
 
 	"gopkg.in/ezzarghili/recaptcha-go.v4"
 	"gopkg.in/yaml.v2"
@@ -16,9 +17,11 @@ const (
 )
 
 type Environ struct {
-	envRequired   `yaml:",inline"`
-	envReCaptcha  `yaml:",inline"`
-	HoneypotField string `yaml:"HONEYPOT_FIELD"`
+	envRequired  `yaml:",inline"`
+	envReCaptcha `yaml:",inline"`
+	// Optional fields
+	HoneypotField        string  `yaml:"HONEYPOT_FIELD"`
+	ReCaptchaV3Threshold float32 `yaml:"RECAPTCHA_V3_THRESHOLD"`
 }
 
 type envRequired struct {
@@ -41,7 +44,7 @@ func (env envReCaptcha) ShouldVerifyReCaptcha() bool {
 	return env.ReCaptchaVersion != ""
 }
 
-func (env envReCaptcha) ParseReCaptchaVersion() recaptcha.VERSION {
+func (env envReCaptcha) GetReCaptchaVersion() recaptcha.VERSION {
 	if env.ReCaptchaVersion == reCaptchaV2 {
 		return recaptcha.V2
 	}
@@ -53,11 +56,9 @@ func ParseEnv(parseFunc func(*Environ) error) (*Environ, error) {
 	if err := parseFunc(env); err != nil {
 		return nil, err
 	}
-
 	if err := validate(env); err != nil {
 		return nil, err
 	}
-
 	return env, nil
 }
 
@@ -77,6 +78,8 @@ func ParseFromOSEnv(env *Environ) error {
 		ReCaptchaSecretKey: os.Getenv("RECAPTCHA_SECRET_KEY"),
 		ReCaptchaVersion:   os.Getenv("RECAPTCHA_VERSION"),
 	}
+	threshold, _ := strconv.ParseFloat(os.Getenv("RECAPTCHA_V3_THRESHOLD"), 32)
+	env.ReCaptchaV3Threshold = float32(threshold)
 	return nil
 }
 
@@ -90,7 +93,6 @@ func GetParseFromYAMLFunc(filePath string) func(*Environ) error {
 		if err := yaml.Unmarshal(fileBytes, env); err != nil {
 			return err
 		}
-
 		return nil
 	}
 }
@@ -125,10 +127,9 @@ func verifyNonEmpty(envStruct interface{}) error {
 			continue
 		}
 
-		val := structVal.Field(i).Interface().(string)
-		if val == "" {
+		if structVal.Field(i).IsZero() {
 			return fmt.Errorf(
-				"environment field '%s' should not be empty",
+				"environment variable '%s' should not be empty",
 				structType.Field(i).Tag.Get("yaml"),
 			)
 		}

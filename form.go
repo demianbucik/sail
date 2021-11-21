@@ -2,8 +2,6 @@ package sail
 
 import (
 	"net/http"
-
-	"github.com/demianbucik/sail/config"
 )
 
 type messageForm struct {
@@ -33,13 +31,13 @@ func (service *sailService) parseForm(request *http.Request) (*emailForm, error)
 		return nil, err
 	}
 
-	if config.Env.ShouldVerifyReCaptcha() {
+	if service.env.ShouldVerifyReCaptcha() {
 		if err := service.formDecoder.Decode(&form.reCaptchaForm, request.Form); err != nil {
 			return nil, err
 		}
 	}
-	if config.Env.HoneypotField != "" {
-		form.Honeypot = request.Form.Get(config.Env.HoneypotField)
+	if service.env.HoneypotField != "" {
+		form.Honeypot = request.Form.Get(service.env.HoneypotField)
 	}
 
 	return form, nil

@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	onceNotDone = 0
-	onceDone    = 1
+	onceNotDone = iota
+	onceDone
 )
 
 type TryOnce struct {

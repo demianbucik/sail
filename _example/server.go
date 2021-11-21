@@ -23,9 +23,9 @@ func main() {
 	log.SetHandler(text.Default)
 	log.SetLevel(log.DebugLevel)
 
-	mux := http.NewServeMux()
 	fs := http.FileServer(http.Dir(*assetsPath))
 
+	mux := http.NewServeMux()
 	mux.HandleFunc("/send-email", sail.SendEmailHandler)
 	mux.Handle("/", fs)
 

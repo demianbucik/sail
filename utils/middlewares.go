@@ -28,8 +28,9 @@ func ApplyMiddlewares(handler http.HandlerFunc, middlewares ...func(http.Handler
 func LogEntryAndRecoverMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	fn := func(writer http.ResponseWriter, request *http.Request) {
 		logEntry := log.WithField("userAgent", request.UserAgent()).
-			WithField("remoteAddr", request.RemoteAddr).
+			WithField("remoteAddr", request.Header.Get("X-Forwarded-For")).
 			WithField("url", request.RequestURI).
+			WithField("host", request.Host).
 			WithField("headers", request.Header)
 
 		defer func() {

@@ -36,6 +36,7 @@ func (service *sailService) parseForm(request *http.Request) (*emailForm, error)
 			return nil, err
 		}
 	}
+
 	if service.env.HoneypotField != "" {
 		form.Honeypot = request.Form.Get(service.env.HoneypotField)
 	}

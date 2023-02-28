@@ -9,5 +9,8 @@ env.local.yaml
 env.staging.yaml
 env.prod.yaml
 
+templates/
+!templates/example*
+
 server
 server-*

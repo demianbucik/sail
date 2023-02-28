@@ -3,7 +3,7 @@
 ## Form setup
 
 This example will help you set up and verify your email form and Sail configuration file.
-File `form.html` contains a basic form. Depending on whether the form submission was successful or not, the server will redirect to `thankyou.html` or `error.html`.
+File `form.html` contains a basic form. Depending on whether the form submission was successful or not, the server will redirect to `success.html` or `error.html`.
 
 All required setting can be configured by modifying the `env.yaml` file, which is used for configuring both the local and production environment.
 

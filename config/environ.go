@@ -2,18 +2,11 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"reflect"
-	"strconv"
 
 	"gopkg.in/ezzarghili/recaptcha-go.v4"
-	"gopkg.in/yaml.v2"
-)
-
-const (
-	reCaptchaV2 = "v2"
-	reCaptchaV3 = "v3"
+	"gopkg.in/yaml.v3"
 )
 
 type Environ struct {
@@ -21,37 +14,41 @@ type Environ struct {
 	envReCaptcha `yaml:",inline"`
 	// Optional fields
 	HoneypotField string `yaml:"HONEYPOT_FIELD"`
-	// GCP requires string values inside environment variables YAML file, using for example 0.25 fails.
-	// The YAML parser can only decode "0.25" as a string. So we need to use 2 variables here.
-	ReCaptchaV3ThresholdStr string `yaml:"RECAPTCHA_V3_THRESHOLD"`
-	ReCaptchaV3Threshold    float32
+}
+
+func (env Environ) HoneypotCheckEnabled() bool {
+	return env.HoneypotField != ""
 }
 
 type envRequired struct {
-	SendGridApiKey       string `yaml:"SENDGRID_API_KEY"`
-	NoReplyEmail         string `yaml:"NOREPLY_EMAIL"`
-	NoReplyName          string `yaml:"NOREPLY_NAME"`
-	RecipientEmail       string `yaml:"RECIPIENT_EMAIL"`
-	RecipientName        string `yaml:"RECIPIENT_NAME"`
-	ThankYouPage         string `yaml:"THANK_YOU_PAGE"`
-	ErrorPage            string `yaml:"ERROR_PAGE"`
-	ConfirmationTemplate string `yaml:"CONFIRMATION_TEMPLATE"`
+	SendGridApiKey           string `yaml:"SENDGRID_API_KEY"`
+	NoReplyEmail             string `yaml:"NOREPLY_EMAIL"`
+	NoReplyName              string `yaml:"NOREPLY_NAME"`
+	RecipientEmail           string `yaml:"RECIPIENT_EMAIL"`
+	RecipientName            string `yaml:"RECIPIENT_NAME"`
+	SuccessPage              string `yaml:"SUCCESS_PAGE"`
+	ErrorPage                string `yaml:"ERROR_PAGE"`
+	EmailTemplateFile        string `yaml:"EMAIL_TEMPLATE_FILE"`
+	ConfirmationTemplateFile string `yaml:"CONFIRMATION_TEMPLATE_FILE"`
 }
 
 type envReCaptcha struct {
-	ReCaptchaSecretKey string `yaml:"RECAPTCHA_SECRET_KEY"`
-	ReCaptchaVersion   string `yaml:"RECAPTCHA_VERSION"`
+	ReCaptchaVersion     string     `yaml:"RECAPTCHA_VERSION"`
+	ReCaptchaSecretKey   string     `yaml:"RECAPTCHA_SECRET_KEY"`
+	ReCaptchaV3Threshold floatAsStr `yaml:"RECAPTCHA_V3_THRESHOLD"`
 }
 
-func (env envReCaptcha) ShouldVerifyReCaptcha() bool {
-	return env.ReCaptchaVersion != ""
+var reCaptchaVersions = map[string]recaptcha.VERSION{
+	"v2": recaptcha.V2,
+	"v3": recaptcha.V3,
+}
+
+func (env envReCaptcha) ReCaptchaEnabled() bool {
+	return env.ReCaptchaVersion != "" && env.ReCaptchaVersion != "off"
 }
 
 func (env envReCaptcha) GetReCaptchaVersion() recaptcha.VERSION {
-	if env.ReCaptchaVersion == reCaptchaV2 {
-		return recaptcha.V2
-	}
-	return recaptcha.V3
+	return reCaptchaVersions[env.ReCaptchaVersion]
 }
 
 func ParseEnv(parseFunc func(*Environ) error) (*Environ, error) {
@@ -72,18 +69,14 @@ func ParseFromOSEnv(env *Environ) error {
 	env.NoReplyName = os.Getenv("NOREPLY_NAME")
 	env.RecipientEmail = os.Getenv("RECIPIENT_EMAIL")
 	env.RecipientName = os.Getenv("RECIPIENT_NAME")
-	env.ThankYouPage = os.Getenv("THANK_YOU_PAGE")
+	env.SuccessPage = os.Getenv("SUCCESS_PAGE")
 	env.ErrorPage = os.Getenv("ERROR_PAGE")
-	env.ConfirmationTemplate = os.Getenv("CONFIRMATION_TEMPLATE")
+	env.EmailTemplateFile = os.Getenv("EMAIL_TEMPLATE_FILE")
+	env.ConfirmationTemplateFile = os.Getenv("CONFIRMATION_TEMPLATE_FILE")
 	env.ReCaptchaSecretKey = os.Getenv("RECAPTCHA_SECRET_KEY")
 	env.ReCaptchaVersion = os.Getenv("RECAPTCHA_VERSION")
-	thresholdStr := os.Getenv("RECAPTCHA_V3_THRESHOLD")
-	if thresholdStr != "" {
-		threshold, err := strconv.ParseFloat(thresholdStr, 32)
-		if err != nil {
-			return err
-		}
-		env.ReCaptchaV3Threshold = float32(threshold)
+	if err := env.ReCaptchaV3Threshold.UnmarshalText([]byte(os.Getenv("RECAPTCHA_V3_THRESHOLD"))); err != nil {
+		return err
 	}
 
 	return nil
@@ -92,45 +85,28 @@ func ParseFromOSEnv(env *Environ) error {
 // GetParseFromYAMLFunc can be used for local development.
 func GetParseFromYAMLFunc(filePath string) func(*Environ) error {
 	return func(env *Environ) error {
-		fileBytes, err := ioutil.ReadFile(filePath)
+		fileBytes, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
 		}
 		if err := yaml.Unmarshal(fileBytes, env); err != nil {
 			return err
 		}
-		if env.ReCaptchaV3ThresholdStr != "" {
-			threshold, err := strconv.ParseFloat(env.ReCaptchaV3ThresholdStr, 32)
-			if err != nil {
-				return err
-			}
-			env.ReCaptchaV3Threshold = float32(threshold)
-		}
 		return nil
 	}
 }
 
 func validate(env *Environ) error {
-	if err := verifyNonEmpty(&env.envRequired); err != nil {
+	if err := validateNonEmpty(&env.envRequired); err != nil {
 		return err
 	}
-
-	if env.ShouldVerifyReCaptcha() {
-		if err := verifyNonEmpty(&env.envReCaptcha); err != nil {
-			return err
-		}
-		if env.ReCaptchaVersion != reCaptchaV2 && env.ReCaptchaVersion != reCaptchaV3 {
-			return fmt.Errorf(
-				"invalid recaptcha version '%s', use 'v2', 'v3', or '' to turn it off",
-				env.ReCaptchaVersion,
-			)
-		}
+	if err := validateReCaptcha(&env.envReCaptcha); err != nil {
+		return err
 	}
-
 	return nil
 }
 
-func verifyNonEmpty(envStruct interface{}) error {
+func validateNonEmpty(envStruct any) error {
 	structVal := reflect.ValueOf(envStruct)
 	structType := reflect.TypeOf(envStruct)
 	if structVal.Kind() == reflect.Ptr {
@@ -145,10 +121,30 @@ func verifyNonEmpty(envStruct interface{}) error {
 
 		if structVal.Field(i).IsZero() {
 			return fmt.Errorf(
-				"environment variable '%s' should not be empty",
+				"%s value should not be empty",
 				structType.Field(i).Tag.Get("yaml"),
 			)
 		}
+	}
+
+	return nil
+}
+
+func validateReCaptcha(env *envReCaptcha) error {
+	if !env.ReCaptchaEnabled() {
+		return nil
+	}
+	if _, isValid := reCaptchaVersions[env.ReCaptchaVersion]; !isValid {
+		return fmt.Errorf(
+			"invalid RECAPTCHA_VERSION value '%s', valid options are 'v2' and 'v3', to disable recaptcha use '' or 'off'",
+			env.ReCaptchaVersion,
+		)
+	}
+	if env.ReCaptchaV3Threshold < 0 || env.ReCaptchaV3Threshold > 1 {
+		return fmt.Errorf("invalid RECAPTCHA_V3_THRESHOLD value '%v', use a value between 0 and 1", env.ReCaptchaV3Threshold)
+	}
+	if env.ReCaptchaSecretKey == "" {
+		return fmt.Errorf("RECAPTCHA_SECRET_KEY value should not be empty")
 	}
 
 	return nil

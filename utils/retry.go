@@ -15,6 +15,7 @@ func Retry(tries int, backOff time.Duration, fn func() error) error {
 			return nil
 		}
 		time.Sleep(backOff)
+		backOff = 2 * backOff
 	}
 	return err
 }

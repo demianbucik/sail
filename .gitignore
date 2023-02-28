@@ -5,7 +5,8 @@ tmp
 .idea
 
 env.yaml
-local.env.yaml
+env.local.yaml
+env.prod.yaml
 
 server
 server-*

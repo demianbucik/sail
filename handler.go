@@ -5,10 +5,10 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"html/template"
 	"net/http"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/apex/log"

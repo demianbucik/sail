@@ -106,40 +106,52 @@ func newSailService(env *config.Environ) (*sailService, error) {
 func (service *sailService) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	logEntry := request.Context().Value(utils.LogEntryCtxKey).(log.Interface)
 
-	if err := service.sendEmailAndConfirmation(request); err != nil {
-		logEntry.WithError(err).WithField("form", request.Form).Warn("Sending email failed")
+	form, err := service.parseForm(request)
+	if err != nil {
+		logEntry.WithError(err).WithField("httpForm", request.Form).Info("Email rejected - invalid form")
 
 		http.Redirect(writer, request, service.env.ErrorPage, http.StatusSeeOther)
 		return
 	}
 
-	logEntry.WithField("form", request.Form).Info("Email sent successfully")
+	logEntry = logEntry.WithField("emailForm", form)
+
+	clientIP := request.Header.Get("X-Forwarded-For")
+	if err = service.verify(form, clientIP); err != nil {
+		logEntry.WithError(err).Info("Email rejected - verification")
+
+		http.Redirect(writer, request, service.env.ErrorPage, http.StatusSeeOther)
+		return
+	}
+
+	if err = service.sendEmailAndConfirmation(form); err != nil {
+		logEntry.WithError(err).Warn("Sending email failed")
+
+		http.Redirect(writer, request, service.env.ErrorPage, http.StatusSeeOther)
+		return
+	}
+
+	logEntry.Info("Email sent successfully")
 
 	http.Redirect(writer, request, service.env.SuccessPage, http.StatusSeeOther)
 }
 
-func (service *sailService) sendEmailAndConfirmation(request *http.Request) error {
-	form, err := service.parseForm(request)
-	if err != nil {
-		return fmt.Errorf("invalid form: %w", err)
-	}
-
-	err = service.checkHoneypot(form)
-	if err != nil {
+func (service *sailService) verify(form *EmailForm, clientIP string) error {
+	if err := service.checkHoneypot(form); err != nil {
 		return fmt.Errorf("honeypot check failed: %w", err)
 	}
-
-	err = service.verifyReCaptcha(form.ReCaptchaChallenge, request.RemoteAddr)
-	if err != nil {
-		return fmt.Errorf("recaptcha failed: %w", err)
+	if err := service.verifyReCaptcha(form.ReCaptchaChallenge, clientIP); err != nil {
+		return fmt.Errorf("recaptcha verification failed: %w", err)
 	}
+	return nil
+}
 
+func (service *sailService) sendEmailAndConfirmation(form *EmailForm) error {
 	message, err := service.newEmail(form)
 	if err != nil {
 		return fmt.Errorf("creating email failed: %w", err)
 	}
-	err = service.sendEmail(message)
-	if err != nil {
+	if err = service.sendEmail(message); err != nil {
 		return fmt.Errorf("sending email failed: %w", err)
 	}
 
@@ -147,16 +159,14 @@ func (service *sailService) sendEmailAndConfirmation(request *http.Request) erro
 	if err != nil {
 		return fmt.Errorf("creating confirmation failed: %w", err)
 	}
-
-	err = service.sendEmail(confirmation)
-	if err != nil {
+	if err = service.sendEmail(confirmation); err != nil {
 		return fmt.Errorf("sending confirmation failed: %w", err)
 	}
 
 	return nil
 }
 
-func (service *sailService) checkHoneypot(form *emailForm) error {
+func (service *sailService) checkHoneypot(form *EmailForm) error {
 	if !service.env.HoneypotCheckEnabled() {
 		return nil
 	}
@@ -166,7 +176,7 @@ func (service *sailService) checkHoneypot(form *emailForm) error {
 	return nil
 }
 
-func (service *sailService) verifyReCaptcha(challenge, remoteAddr string) error {
+func (service *sailService) verifyReCaptcha(challenge, clientIP string) error {
 	if !service.env.ReCaptchaEnabled() {
 		return nil
 	}
@@ -176,7 +186,7 @@ func (service *sailService) verifyReCaptcha(challenge, remoteAddr string) error 
 	var err error
 	_ = utils.Retry(tries, retryBackOff, func() error {
 		err = service.reCaptcha.VerifyWithOptions(challenge, recaptcha.VerifyOption{
-			RemoteIP: remoteAddr,
+			RemoteIP: clientIP,
 			// Threshold is only used for recaptcha v3
 			// and using a zero value defaults to 0.5.
 			Threshold: float32(service.env.ReCaptchaV3Threshold),
@@ -203,7 +213,7 @@ func (service *sailService) sendEmail(message *mail.SGMailV3) error {
 	})
 }
 
-func (service *sailService) newEmail(form *emailForm) (*mail.SGMailV3, error) {
+func (service *sailService) newEmail(form *EmailForm) (*mail.SGMailV3, error) {
 	from := mail.NewEmail(service.env.NoReplyName, service.env.NoReplyEmail)
 	to := mail.NewEmail(service.env.RecipientName, service.env.RecipientEmail)
 	replyTo := mail.NewEmail(form.Name, form.Email)
@@ -222,7 +232,7 @@ func (service *sailService) newEmail(form *emailForm) (*mail.SGMailV3, error) {
 	return email, nil
 }
 
-func (service *sailService) newConfirmation(form *emailForm) (*mail.SGMailV3, error) {
+func (service *sailService) newConfirmation(form *EmailForm) (*mail.SGMailV3, error) {
 	from := mail.NewEmail(service.env.NoReplyName, service.env.NoReplyEmail)
 	to := mail.NewEmail(form.Name, form.Email)
 	replyTo := mail.NewEmail(service.env.RecipientName, service.env.RecipientEmail)
@@ -241,7 +251,7 @@ func (service *sailService) newConfirmation(form *emailForm) (*mail.SGMailV3, er
 	return email, nil
 }
 
-func (service *sailService) createBodyFromTemplate(name string, form *emailForm) ([]byte, error) {
+func (service *sailService) createBodyFromTemplate(name string, form *EmailForm) ([]byte, error) {
 	buf := &bytes.Buffer{}
 	err := service.templates.ExecuteTemplate(buf, name, map[string]any{
 		"FORM_NAME":       form.Name,

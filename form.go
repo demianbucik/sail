@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-type emailForm struct {
+type EmailForm struct {
 	Name    string `schema:"name,required" json:"name"`
 	Email   string `schema:"email,required" json:"email"`
 	Subject string `schema:"subject,required" json:"subject"`
@@ -15,12 +15,12 @@ type emailForm struct {
 	HoneypotValue string `schema:"-" json:"honeypot-value"`
 }
 
-func (service *sailService) parseForm(request *http.Request) (*emailForm, error) {
+func (service *sailService) parseForm(request *http.Request) (*EmailForm, error) {
 	if err := request.ParseForm(); err != nil {
 		return nil, err
 	}
 
-	form := &emailForm{}
+	form := &EmailForm{}
 	if err := service.formDecoder.Decode(form, request.Form); err != nil {
 		return nil, err
 	}

@@ -97,16 +97,16 @@ func GetParseFromYAMLFunc(filePath string) func(*Environ) error {
 }
 
 func validate(env *Environ) error {
-	if err := verifyNonEmpty(&env.envRequired); err != nil {
+	if err := validateNonEmpty(&env.envRequired); err != nil {
 		return err
 	}
-	if err := verifyReCaptcha(&env.envReCaptcha); err != nil {
+	if err := validateReCaptcha(&env.envReCaptcha); err != nil {
 		return err
 	}
 	return nil
 }
 
-func verifyNonEmpty(envStruct any) error {
+func validateNonEmpty(envStruct any) error {
 	structVal := reflect.ValueOf(envStruct)
 	structType := reflect.TypeOf(envStruct)
 	if structVal.Kind() == reflect.Ptr {
@@ -130,7 +130,7 @@ func verifyNonEmpty(envStruct any) error {
 	return nil
 }
 
-func verifyReCaptcha(env *envReCaptcha) error {
+func validateReCaptcha(env *envReCaptcha) error {
 	if !env.ReCaptchaEnabled() {
 		return nil
 	}

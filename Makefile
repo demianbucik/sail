@@ -1,10 +1,10 @@
 .DEFAULT_GOAL := help
 
 deploy: ## Deploy the function to GCP production environment
-	./deploy.sh send-email
+	./deploy.sh send-email "$(ENV)"
 
 deploy_staging: ## Deploy the function to GCP staging environment
-	./deploy.sh staging-send-email
+	./deploy.sh staging-send-email "$(ENV)"
 
 binaries: ## Compile server binaries for local environment
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ./_example/server-linux-amd64 ./_example

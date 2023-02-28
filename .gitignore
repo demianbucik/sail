@@ -6,6 +6,7 @@ tmp
 
 env.yaml
 env.local.yaml
+env.staging.yaml
 env.prod.yaml
 
 server

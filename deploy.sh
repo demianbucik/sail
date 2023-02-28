@@ -1,6 +1,7 @@
 #!/bin/bash
 
-NAME=$1
+NAME="$1"
+ENV_FILE="${2:-env.yaml}"
 
 gcloud alpha functions \
     deploy \
@@ -14,8 +15,7 @@ gcloud alpha functions \
     --memory=256MB \
     --cpu=1 \
     --runtime=go120 \
-    --timeout=7 \
+    --timeout=10 \
     --max-instances=2 \
     --concurrency=50 \
-    --env-vars-file=./env.yaml
-#    --docker-registry=artifact-registry \
+    --env-vars-file="$ENV_FILE"

@@ -14,11 +14,10 @@ binaries: ## Compile server binaries for local environment
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o ./_example/server-windows-amd64.exe ./_example
 
 tools: ## Install tools required for development
-	go install github.com/vektra/mockery/cmd/mockery
+	go install github.com/vektra/mockery/v2
 
-mocks: tools ## Generate mocks for testing
-	go generate -x ./utils/recaptcha.go
-	go generate -x ./utils/sendgrid.go
+mocks: ## Generate mocks for testing
+	go generate -x -run mockery ./...
 
 help: ## Show help
 	@grep -h '\s##\s' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'

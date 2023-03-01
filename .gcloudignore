@@ -15,6 +15,9 @@
 node_modules
 #!include:.gitignore
 
+# Include all templates
+!templates
+
 _example
 
 deploy.sh

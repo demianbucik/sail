@@ -5,9 +5,7 @@ tmp
 .idea
 
 env.yaml
-env.local.yaml
-env.staging.yaml
-env.prod.yaml
+env.*.yaml
 
 templates/
 !templates/example*

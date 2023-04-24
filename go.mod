@@ -8,7 +8,6 @@ require (
 	github.com/sendgrid/rest v2.6.9+incompatible
 	github.com/sendgrid/sendgrid-go v3.12.0+incompatible
 	github.com/vektra/mockery/v2 v2.20.2
-	gopkg.in/ezzarghili/recaptcha-go.v4 v4.3.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

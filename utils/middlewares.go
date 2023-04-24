@@ -4,9 +4,17 @@ import (
 	"context"
 	"net/http"
 	"runtime/debug"
+	"time"
 
 	"github.com/apex/log"
 )
+
+func MiddlewareWrap(handler http.HandlerFunc, middlewares ...func(http.HandlerFunc) http.HandlerFunc) http.HandlerFunc {
+	for _, middleware := range middlewares {
+		handler = middleware(handler)
+	}
+	return handler
+}
 
 type ContextKey struct {
 	name string
@@ -16,26 +24,53 @@ func (key ContextKey) String() string {
 	return key.name
 }
 
-var LogEntryCtxKey = &ContextKey{name: "LogEntry"}
+var RequestCtxKey = &ContextKey{name: "RequestContext"}
 
-func ApplyMiddlewares(handler http.HandlerFunc, middlewares ...func(http.HandlerFunc) http.HandlerFunc) http.HandlerFunc {
-	for _, middleware := range middlewares {
-		handler = middleware(handler)
-	}
-	return handler
+type RequestContext struct {
+	RequestLog *HttpRequestLog
+	LogEntry   *log.Entry
 }
 
-func LogEntryAndRecoverMiddleware(next http.HandlerFunc) http.HandlerFunc {
+type HttpRequestLog struct {
+	Timestamp     time.Time `json:"-"`
+	Latency       string    `json:"latency,omitempty"`
+	Protocol      string    `json:"protocol,omitempty"`
+	Referer       string    `json:"referer,omitempty"`
+	RemoteIp      string    `json:"remoteIp,omitempty"`
+	RequestMethod string    `json:"requestMethod,omitempty"`
+	RequestUrl    string    `json:"requestUrl,omitempty"`
+	UserAgent     string    `json:"userAgent,omitempty"`
+	ServerIp      string    `json:"serverIp,omitempty"`
+}
+
+func (reqLog *HttpRequestLog) Finalize() {
+	reqLog.Latency = time.Since(reqLog.Timestamp).String()
+}
+
+func LogAndRecoverMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	fn := func(writer http.ResponseWriter, request *http.Request) {
-		logEntry := log.WithField("userAgent", request.UserAgent()).
-			WithField("clientIP", request.Header.Get("X-Forwarded-For")).
-			WithField("url", request.RequestURI).
-			WithField("host", request.Host).
-			WithField("headers", request.Header)
+		reqLog := &HttpRequestLog{
+			Timestamp:     time.Now(),
+			Protocol:      request.Proto,
+			Referer:       request.Referer(),
+			RemoteIp:      request.Header.Get("X-Forwarded-For"),
+			RequestMethod: request.Method,
+			RequestUrl:    request.RequestURI,
+			UserAgent:     request.UserAgent(),
+			ServerIp:      request.RemoteAddr,
+		}
+		reqCtx := &RequestContext{
+			RequestLog: reqLog,
+			LogEntry:   log.WithField("httpRequest", reqLog),
+		}
 
 		defer func() {
 			if rvr := recover(); rvr != nil {
-				logEntry.WithField("panic", rvr).
+				if request.ParseForm() == nil {
+					reqCtx.LogEntry = reqCtx.LogEntry.WithField("httpForm", request.Form)
+				}
+				reqLog.Finalize()
+				reqCtx.LogEntry.WithField("panic", rvr).
 					WithField("stackTrace", string(debug.Stack())).
 					Error("Handler panicked")
 
@@ -43,7 +78,7 @@ func LogEntryAndRecoverMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}()
 
-		ctx := context.WithValue(request.Context(), LogEntryCtxKey, logEntry)
+		ctx := context.WithValue(request.Context(), RequestCtxKey, reqCtx)
 		next.ServeHTTP(writer, request.WithContext(ctx))
 	}
 	return fn

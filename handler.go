@@ -191,8 +191,7 @@ func (service *sailService) verifyReCaptcha(response, clientIp string) error {
 			RemoteIp:       clientIp,
 			ScoreThreshold: float64(service.env.ReCaptchaV3Threshold),
 		})
-		var verifyErr *utils.VerifyError
-		if errors.As(err, &verifyErr) && verifyErr.IsHttpError {
+		if v, ok := err.(utils.VerifyError); ok && v.IsHttpError {
 			return err
 		}
 		return nil

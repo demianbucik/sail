@@ -6,7 +6,8 @@ package sail
 import (
 	"github.com/sendgrid/rest"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
-	"gopkg.in/ezzarghili/recaptcha-go.v4"
+
+	"github.com/demianbucik/sail/utils"
 )
 
 type SendGridClient interface {
@@ -14,6 +15,5 @@ type SendGridClient interface {
 }
 
 type ReCaptchaClient interface {
-	Verify(challenge string) error
-	VerifyWithOptions(challenge string, options recaptcha.VerifyOption) error
+	Verify(response string, opts utils.VerifyOptions) error
 }

@@ -10,7 +10,7 @@ type EmailForm struct {
 	Subject string `schema:"subject,required" json:"subject"`
 	Message string `schema:"message,required" json:"message"`
 
-	ReCaptchaChallenge string `schema:"g-recaptcha-response" json:"g-recaptcha-response"`
+	ReCaptchaResponse string `schema:"g-recaptcha-response" json:"g-recaptcha-response"`
 
 	HoneypotValue string `schema:"-" json:"honeypot-value"`
 }

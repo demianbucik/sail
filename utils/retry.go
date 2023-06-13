@@ -7,9 +7,9 @@ import (
 
 var ErrNeverTried = errors.New("never tried")
 
-func Retry(tries int, backOff time.Duration, fn func() error) error {
+func Retry(retries int, backOff time.Duration, fn func() error) error {
 	err := ErrNeverTried
-	for i := 0; i < tries; i++ {
+	for i := 0; i < retries+1; i++ {
 		err = fn()
 		if err == nil {
 			return nil

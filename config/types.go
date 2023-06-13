@@ -9,10 +9,7 @@ import "strconv"
 type floatAsStr float64
 
 func (f floatAsStr) MarshalText() ([]byte, error) {
-	text := ""
-	if f != 0 {
-		text = strconv.FormatFloat(float64(f), 'f', -1, 64)
-	}
+	text := strconv.FormatFloat(float64(f), 'f', -1, 64)
 	return []byte(text), nil
 }
 

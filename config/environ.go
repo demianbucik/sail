@@ -5,8 +5,9 @@ import (
 	"os"
 	"reflect"
 
-	"gopkg.in/ezzarghili/recaptcha-go.v4"
 	"gopkg.in/yaml.v3"
+
+	"github.com/demianbucik/sail/utils"
 )
 
 type Environ struct {
@@ -33,22 +34,13 @@ type envRequired struct {
 }
 
 type envReCaptcha struct {
-	ReCaptchaVersion     string     `yaml:"RECAPTCHA_VERSION"`
-	ReCaptchaSecretKey   string     `yaml:"RECAPTCHA_SECRET_KEY"`
-	ReCaptchaV3Threshold floatAsStr `yaml:"RECAPTCHA_V3_THRESHOLD"`
-}
-
-var reCaptchaVersions = map[string]recaptcha.VERSION{
-	"v2": recaptcha.V2,
-	"v3": recaptcha.V3,
+	ReCaptchaVersion     utils.RecaptchaVersion `yaml:"RECAPTCHA_VERSION"`
+	ReCaptchaSecretKey   string                 `yaml:"RECAPTCHA_SECRET_KEY"`
+	ReCaptchaV3Threshold floatAsStr             `yaml:"RECAPTCHA_V3_THRESHOLD"`
 }
 
 func (env envReCaptcha) ReCaptchaEnabled() bool {
 	return env.ReCaptchaVersion != "" && env.ReCaptchaVersion != "off"
-}
-
-func (env envReCaptcha) GetReCaptchaVersion() recaptcha.VERSION {
-	return reCaptchaVersions[env.ReCaptchaVersion]
 }
 
 func ParseEnv(parseFunc func(*Environ) error) (*Environ, error) {
@@ -74,7 +66,7 @@ func ParseFromOSEnv(env *Environ) error {
 	env.EmailTemplateFile = os.Getenv("EMAIL_TEMPLATE_FILE")
 	env.ConfirmationTemplateFile = os.Getenv("CONFIRMATION_TEMPLATE_FILE")
 	env.ReCaptchaSecretKey = os.Getenv("RECAPTCHA_SECRET_KEY")
-	env.ReCaptchaVersion = os.Getenv("RECAPTCHA_VERSION")
+	env.ReCaptchaVersion = utils.RecaptchaVersion(os.Getenv("RECAPTCHA_VERSION"))
 	if err := env.ReCaptchaV3Threshold.UnmarshalText([]byte(os.Getenv("RECAPTCHA_V3_THRESHOLD"))); err != nil {
 		return err
 	}
@@ -134,9 +126,9 @@ func validateReCaptcha(env *envReCaptcha) error {
 	if !env.ReCaptchaEnabled() {
 		return nil
 	}
-	if _, isValid := reCaptchaVersions[env.ReCaptchaVersion]; !isValid {
+	if env.ReCaptchaVersion != utils.ReCaptchaV2 && env.ReCaptchaVersion != utils.ReCaptchaV3 && env.ReCaptchaVersion != utils.ReCaptchaCf {
 		return fmt.Errorf(
-			"invalid RECAPTCHA_VERSION value '%s', valid options are 'v2' and 'v3', to disable recaptcha use '' or 'off'",
+			"invalid RECAPTCHA_VERSION value '%s', valid options are 'v2', 'v3' and 'cf', to disable recaptcha use '' or 'off'",
 			env.ReCaptchaVersion,
 		)
 	}

@@ -15,14 +15,13 @@ import (
 	"github.com/gorilla/schema"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
-	"gopkg.in/ezzarghili/recaptcha-go.v4"
 
 	"github.com/demianbucik/sail/config"
 	"github.com/demianbucik/sail/utils"
 )
 
 const (
-	tries            = 3
+	retries          = 2
 	retryBackOff     = 10 * time.Millisecond
 	reCaptchaTimeout = 2 * time.Second
 )
@@ -35,23 +34,13 @@ var (
 	service *sailService
 )
 
-type sailService struct {
-	env *config.Environ
-
-	emailClient SendGridClient
-	reCaptcha   ReCaptchaClient
-
-	formDecoder *schema.Decoder
-	templates   *template.Template
-}
-
-var SendEmailHandler = utils.ApplyMiddlewares(
-	sendEmailHandler,
+var SendEmailHandler = utils.MiddlewareWrap(
+	initAndServe,
 	utils.CORSMiddleware,
-	utils.LogEntryAndRecoverMiddleware,
+	utils.LogAndRecoverMiddleware,
 ).ServeHTTP
 
-func sendEmailHandler(writer http.ResponseWriter, request *http.Request) {
+func initAndServe(writer http.ResponseWriter, request *http.Request) {
 	Init(config.ParseFromOSEnv)
 	service.ServeHTTP(writer, request)
 }
@@ -76,14 +65,23 @@ func Init(parseFunc func(*config.Environ) error) {
 	}
 }
 
-func newSailService(env *config.Environ) (*sailService, error) {
-	sendClient := sendgrid.NewSendClient(env.SendGridApiKey)
+type sailService struct {
+	env *config.Environ
 
-	var reCaptcha ReCaptchaClient
-	if env.ReCaptchaEnabled() {
-		// Error can only occur if secret key is empty
-		re, _ := recaptcha.NewReCAPTCHA(env.ReCaptchaSecretKey, env.GetReCaptchaVersion(), reCaptchaTimeout)
-		reCaptcha = &re
+	emailClient     SendGridClient
+	reCaptchaClient ReCaptchaClient
+
+	formDecoder *schema.Decoder
+	templates   *template.Template
+}
+
+func newSailService(env *config.Environ) (*sailService, error) {
+	emailClient := sendgrid.NewSendClient(env.SendGridApiKey)
+
+	reCaptchaClient := &utils.ReCaptcha{
+		Client:  http.Client{Timeout: reCaptchaTimeout},
+		Secret:  env.ReCaptchaSecretKey,
+		Version: env.ReCaptchaVersion,
 	}
 
 	formDecoder := schema.NewDecoder()
@@ -95,53 +93,57 @@ func newSailService(env *config.Environ) (*sailService, error) {
 	}
 
 	return &sailService{
-		env:         env,
-		emailClient: sendClient,
-		reCaptcha:   reCaptcha,
-		formDecoder: formDecoder,
-		templates:   templates.Option("missingkey=error"),
+		env:             env,
+		emailClient:     emailClient,
+		reCaptchaClient: reCaptchaClient,
+		formDecoder:     formDecoder,
+		templates:       templates.Option("missingkey=error"),
 	}, nil
 }
 
 func (service *sailService) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	logEntry := request.Context().Value(utils.LogEntryCtxKey).(log.Interface)
+	reqCtx := request.Context().Value(utils.RequestCtxKey).(*utils.RequestContext)
 
 	form, err := service.parseForm(request)
 	if err != nil {
-		logEntry.WithError(err).WithField("httpForm", request.Form).Info("Email rejected - invalid form")
+		reqCtx.RequestLog.Finalize()
+		reqCtx.LogEntry.WithError(err).WithField("httpForm", request.Form).Info("Email rejected - invalid form")
 
 		http.Redirect(writer, request, service.env.ErrorPage, http.StatusSeeOther)
 		return
 	}
 
-	logEntry = logEntry.WithField("emailForm", form)
+	reqCtx.LogEntry = reqCtx.LogEntry.WithField("emailForm", form)
 
-	clientIP := request.Header.Get("X-Forwarded-For")
-	if err = service.verify(form, clientIP); err != nil {
-		logEntry.WithError(err).Info("Email rejected - verification")
+	clientIp := reqCtx.RequestLog.RemoteIp
+	if err = service.verify(form, clientIp); err != nil {
+		reqCtx.RequestLog.Finalize()
+		reqCtx.LogEntry.WithError(err).Info("Email rejected - verification")
 
 		http.Redirect(writer, request, service.env.ErrorPage, http.StatusSeeOther)
 		return
 	}
 
 	if err = service.sendEmailAndConfirmation(form); err != nil {
-		logEntry.WithError(err).Warn("Sending email failed")
+		reqCtx.RequestLog.Finalize()
+		reqCtx.LogEntry.WithError(err).Warn("Sending email failed")
 
 		http.Redirect(writer, request, service.env.ErrorPage, http.StatusSeeOther)
 		return
 	}
 
-	logEntry.Info("Email sent successfully")
+	reqCtx.RequestLog.Finalize()
+	reqCtx.LogEntry.Info("Email sent successfully")
 
 	http.Redirect(writer, request, service.env.SuccessPage, http.StatusSeeOther)
 }
 
-func (service *sailService) verify(form *EmailForm, clientIP string) error {
+func (service *sailService) verify(form *EmailForm, clientIp string) error {
+	if err := service.verifyReCaptcha(form.ReCaptchaResponse, clientIp); err != nil {
+		return fmt.Errorf("recaptcha verification failed: %w", err)
+	}
 	if err := service.checkHoneypot(form); err != nil {
 		return fmt.Errorf("honeypot check failed: %w", err)
-	}
-	if err := service.verifyReCaptcha(form.ReCaptchaChallenge, clientIP); err != nil {
-		return fmt.Errorf("recaptcha verification failed: %w", err)
 	}
 	return nil
 }
@@ -176,23 +178,20 @@ func (service *sailService) checkHoneypot(form *EmailForm) error {
 	return nil
 }
 
-func (service *sailService) verifyReCaptcha(challenge, clientIP string) error {
+func (service *sailService) verifyReCaptcha(response, clientIp string) error {
 	if !service.env.ReCaptchaEnabled() {
 		return nil
 	}
-	if challenge == "" {
-		return errors.New("recaptcha challenge is empty")
+	if response == "" {
+		return errors.New("recaptcha response is empty")
 	}
 	var err error
-	_ = utils.Retry(tries, retryBackOff, func() error {
-		err = service.reCaptcha.VerifyWithOptions(challenge, recaptcha.VerifyOption{
-			RemoteIP: clientIP,
-			// Threshold is only used for recaptcha v3
-			// and using a zero value defaults to 0.5.
-			Threshold: float32(service.env.ReCaptchaV3Threshold),
+	utils.Retry(retries, retryBackOff, func() error {
+		err = service.reCaptchaClient.Verify(response, utils.VerifyOptions{
+			RemoteIp:       clientIp,
+			ScoreThreshold: float64(service.env.ReCaptchaV3Threshold),
 		})
-		var rcErr *recaptcha.Error
-		if errors.As(err, &rcErr) && rcErr.RequestError {
+		if v, ok := err.(utils.VerifyError); ok && v.IsHttpError {
 			return err
 		}
 		return nil
@@ -201,7 +200,7 @@ func (service *sailService) verifyReCaptcha(challenge, clientIP string) error {
 }
 
 func (service *sailService) sendEmail(message *mail.SGMailV3) error {
-	return utils.Retry(tries, retryBackOff, func() error {
+	return utils.Retry(retries, retryBackOff, func() error {
 		resp, err := service.emailClient.Send(message)
 		if err != nil {
 			return err

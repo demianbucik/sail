@@ -86,10 +86,6 @@ func (c *ReCaptcha) Verify(response string, opts VerifyOptions) error {
 		return VerifyError{Err: errors.New(strings.Join(body.ErrorCodes, ", "))}
 	}
 
-	if body.Action != "" && body.Action != opts.Action {
-		return VerifyError{Err: fmt.Errorf("action '%s' does not match '%s'", body.Action, opts.Action)}
-	}
-
 	if c.Version == ReCaptchaV3 {
 		if body.Score < opts.ScoreThreshold {
 			return VerifyError{Err: fmt.Errorf("score '%.3f' is below '%.3f'", body.Score, opts.ScoreThreshold)}

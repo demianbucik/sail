@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <title>Title</title>
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?compat=recaptcha" async defer></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
   </head>
   <style>
       .honey {
@@ -33,7 +33,7 @@
       <div>
         <input class="honey" name="honeypot" type="text" placeholder="Honeypot" autocomplete="off">
       </div>
-      <div class="cf-turnstile" data-sitekey="1x00000000000000000000AA" data-theme="light"></div>
+      <div class="cf-turnstile" data-sitekey="1x00000000000000000000AA" data-theme="light" data-response-field-name="g-recaptcha-response"></div>
       <button type="submit">Submit</button>
     </form>
   </body>
